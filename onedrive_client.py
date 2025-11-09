@@ -23,7 +23,7 @@ except ImportError:
 
 # Microsoft Graph API endpoints
 GRAPH_API_BASE = "https://graph.microsoft.com/v1.0"
-AUTHORITY = "https://login.microsoftonline.com/common"
+AUTHORITY = "https://login.microsoftonline.com/consumers"  # For personal Microsoft accounts
 SCOPES = ["Files.ReadWrite.All"]  # offline_access is automatically included
 
 
@@ -70,10 +70,20 @@ class OneDriveClient:
         
         # If no cache or cache expired, use device code flow
         print(f"{Fore.CYAN}Starting device code authentication flow...")
-        flow = self.app.initiate_device_flow(scopes=SCOPES)
+        
+        try:
+            flow = self.app.initiate_device_flow(scopes=SCOPES)
+        except Exception as e:
+            print(f"{Fore.RED}Failed to create device flow: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
         
         if "user_code" not in flow:
             print(f"{Fore.RED}Failed to create device flow")
+            if "error" in flow:
+                print(f"{Fore.RED}Error: {flow.get('error')}")
+                print(f"{Fore.RED}Error description: {flow.get('error_description')}")
             return False
         
         print(f"\n{Fore.YELLOW}{'='*80}")
@@ -83,7 +93,13 @@ class OneDriveClient:
         print(f"{Fore.YELLOW}{'='*80}\n")
         
         # Wait for user to authenticate
-        result = self.app.acquire_token_by_device_flow(flow)
+        try:
+            result = self.app.acquire_token_by_device_flow(flow)
+        except Exception as e:
+            print(f"{Fore.RED}Device flow authentication failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
         
         if "access_token" in result:
             self.access_token = result["access_token"]
@@ -91,6 +107,8 @@ class OneDriveClient:
             return True
         else:
             print(f"{Fore.RED}Authentication failed: {result.get('error_description', 'Unknown error')}")
+            if "error" in result:
+                print(f"{Fore.RED}Error code: {result.get('error')}")
             return False
     
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Optional[requests.Response]:
