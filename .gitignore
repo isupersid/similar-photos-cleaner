@@ -46,6 +46,10 @@ photo_decisions.json
 # Dropbox cache
 .photocleaner_dropbox_cache.json
 
+# Google Photos cache and credentials
+.photocleaner_google_token.pickle
+google_photos_credentials.json
+
 # Temporary download directories
 temp_photos/
 photocleaner_*/
