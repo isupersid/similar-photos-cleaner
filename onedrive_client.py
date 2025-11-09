@@ -203,7 +203,7 @@ class OneDriveClient:
         
         # Use the /me/photos endpoint which returns items with image metadata
         # This endpoint automatically filters to just photos
-        endpoint = "/me/drive/root/view.photos"
+        endpoint = "/me/drive/special/pictures/children"
         
         photos = []
         next_link = None
@@ -222,7 +222,16 @@ class OneDriveClient:
                 response = self._make_request('GET', endpoint)
             
             if not response or response.status_code != 200:
-                print(f"{Fore.YELLOW}Photos API not available (status: {response.status_code if response else 'No response'})")
+                print(f"{Fore.YELLOW}Photos API not available")
+                print(f"{Fore.YELLOW}  Status: {response.status_code if response else 'No response'}")
+                if response:
+                    print(f"{Fore.YELLOW}  Endpoint: {endpoint}")
+                    try:
+                        error_data = response.json()
+                        print(f"{Fore.YELLOW}  Error: {error_data.get('error', {}).get('code', 'Unknown')}")
+                        print(f"{Fore.YELLOW}  Message: {error_data.get('error', {}).get('message', 'No message')}")
+                    except:
+                        print(f"{Fore.YELLOW}  Response: {response.text[:200] if response.text else 'Empty'}")
                 print(f"{Fore.CYAN}Falling back to standard search...")
                 # Fallback to standard listing with client-side filtering
                 return self._list_photos_standard_with_date_filter(folder, date_from, date_to)
@@ -373,9 +382,16 @@ class OneDriveClient:
                 response = self._make_request('GET', endpoint)
             
             if not response or response.status_code != 200:
-                print(f"{Fore.RED}Failed to fetch photos: {response.status_code if response else 'No response'}")
+                print(f"{Fore.RED}Failed to fetch photos from OneDrive")
+                print(f"{Fore.RED}  Status: {response.status_code if response else 'No response'}")
                 if response:
-                    print(f"{Fore.RED}Response: {response.text}")
+                    print(f"{Fore.RED}  Endpoint: {endpoint if not next_link else 'Next page link'}")
+                    try:
+                        error_data = response.json()
+                        print(f"{Fore.RED}  Error: {error_data.get('error', {}).get('code', 'Unknown')}")
+                        print(f"{Fore.RED}  Message: {error_data.get('error', {}).get('message', 'No message')}")
+                    except:
+                        print(f"{Fore.RED}  Response: {response.text[:200]}")
                 break
             
             data = response.json()
@@ -471,7 +487,16 @@ class OneDriveClient:
         if response and response.status_code == 204:
             return True
         else:
-            print(f"{Fore.RED}Failed to delete: {response.status_code if response else 'No response'}")
+            print(f"{Fore.RED}Failed to delete item {item_id}")
+            print(f"{Fore.RED}  Status: {response.status_code if response else 'No response'}")
+            if response:
+                print(f"{Fore.RED}  Endpoint: {endpoint}")
+                try:
+                    error_data = response.json()
+                    print(f"{Fore.RED}  Error: {error_data.get('error', {}).get('code', 'Unknown')}")
+                    print(f"{Fore.RED}  Message: {error_data.get('error', {}).get('message', 'No message')}")
+                except:
+                    print(f"{Fore.RED}  Response: {response.text[:200]}")
             return False
     
     def move_photo_to_trash(self, item_id: str, trash_folder: str = "PhotoCleanerTrash") -> bool:
@@ -503,7 +528,16 @@ class OneDriveClient:
         if response and response.status_code == 200:
             return True
         else:
-            print(f"{Fore.RED}Failed to move to trash: {response.status_code if response else 'No response'}")
+            print(f"{Fore.RED}Failed to move to trash: item {item_id}")
+            print(f"{Fore.RED}  Status: {response.status_code if response else 'No response'}")
+            if response:
+                print(f"{Fore.RED}  Endpoint: {endpoint}")
+                try:
+                    error_data = response.json()
+                    print(f"{Fore.RED}  Error: {error_data.get('error', {}).get('code', 'Unknown')}")
+                    print(f"{Fore.RED}  Message: {error_data.get('error', {}).get('message', 'No message')}")
+                except:
+                    print(f"{Fore.RED}  Response: {response.text[:200]}")
             return False
     
     def _ensure_trash_folder(self, folder_name: str) -> Optional[str]:
