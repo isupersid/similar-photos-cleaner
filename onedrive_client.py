@@ -154,7 +154,7 @@ class OneDriveClient:
         List photos from OneDrive folder
         
         Args:
-            folder: Folder path (e.g., '/Photos', '' for root)
+            folder: Folder path (e.g., '/Photos', 'photos' for special folder, '' for root)
             date_from: Start date filter (YYYY-MM-DD format)
             date_to: End date filter (YYYY-MM-DD format)
         
@@ -163,12 +163,150 @@ class OneDriveClient:
         """
         print(f"{Fore.CYAN}Fetching photos from OneDrive folder: {folder or 'root'}...")
         
+        # If date filtering is specified, use search API for efficiency
+        if date_from or date_to:
+            print(f"{Fore.CYAN}Using Microsoft Graph Search API for date-filtered query...")
+            return self._search_photos_by_date(folder, date_from, date_to)
+        
+        # Otherwise, use standard folder listing
+        return self._list_photos_standard(folder)
+    
+    def _search_photos_by_date(self, folder: str, date_from: str = None, date_to: str = None) -> List[Dict]:
+        """
+        Search for photos using Microsoft Graph Search API with date filtering
+        
+        Args:
+            folder: Folder path
+            date_from: Start date (YYYY-MM-DD)
+            date_to: End date (YYYY-MM-DD)
+        
+        Returns:
+            List of photo metadata dictionaries
+        """
+        from datetime import datetime
+        
+        # Build search query
+        # Microsoft Graph uses ISO 8601 format for dates
+        queries = []
+        
+        # Add file type filter for images
+        image_extensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp', 'heic', 'heif']
+        extension_query = ' OR '.join([f'fileExtension:{ext}' for ext in image_extensions])
+        
+        # Add date range filters
+        if date_from:
+            # Convert to ISO 8601 datetime (start of day)
+            date_obj = datetime.strptime(date_from, '%Y-%m-%d')
+            iso_date = date_obj.strftime('%Y-%m-%dT00:00:00Z')
+            queries.append(f'lastModifiedDateTime>={iso_date}')
+        
+        if date_to:
+            # Convert to ISO 8601 datetime (end of day)
+            date_obj = datetime.strptime(date_to, '%Y-%m-%d')
+            iso_date = date_obj.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%dT23:59:59Z')
+            queries.append(f'lastModifiedDateTime<={iso_date}')
+        
+        # Combine queries
+        query_string = f"({extension_query})"
+        if queries:
+            query_string += ' AND ' + ' AND '.join(queries)
+        
+        print(f"{Fore.CYAN}Search query: {query_string}")
+        
+        # Prepare search request
+        endpoint = "/me/drive/root/search(q='')"
+        
+        # Use POST request with search query in body for complex queries
+        # Or use GET with query parameter
+        photos = []
+        next_link = None
+        batch_count = 0
+        
+        while True:
+            batch_count += 1
+            
+            if next_link:
+                response = requests.get(
+                    next_link,
+                    headers={'Authorization': f'Bearer {self.access_token}'}
+                )
+            else:
+                # Build search URL with query
+                import urllib.parse
+                encoded_query = urllib.parse.quote(query_string)
+                search_endpoint = f"/me/drive/root/search(q='{encoded_query}')"
+                response = self._make_request('GET', search_endpoint)
+            
+            if not response or response.status_code != 200:
+                print(f"{Fore.RED}Search failed: {response.status_code if response else 'No response'}")
+                if response:
+                    print(f"{Fore.RED}Response: {response.text}")
+                break
+            
+            data = response.json()
+            items = data.get('value', [])
+            
+            print(f"{Fore.CYAN}Batch {batch_count}: Found {len(items)} items")
+            
+            # Process results
+            for item in items:
+                if item.get('file'):  # It's a file
+                    name = item.get('name', '')
+                    ext = Path(name).suffix.lower()
+                    
+                    # Filter by folder if specified
+                    if folder:
+                        item_path = item.get('parentReference', {}).get('path', '')
+                        folder_lower = folder.lower().strip('/')
+                        
+                        # Check if item is in the specified folder or subfolder
+                        if folder_lower not in item_path.lower():
+                            continue
+                    
+                    photos.append({
+                        'name': name,
+                        'id': item.get('id'),
+                        'path': item.get('@microsoft.graph.downloadUrl', ''),
+                        'size': item.get('size', 0),
+                        'modified': item.get('lastModifiedDateTime', '')
+                    })
+            
+            print(f"{Fore.CYAN}  Total matching photos: {len(photos)}")
+            
+            # Check for next page
+            next_link = data.get('@odata.nextLink')
+            if not next_link:
+                break
+        
+        print(f"\n{Fore.GREEN}Found {len(photos)} photos matching search criteria")
+        return photos
+    
+    def _list_photos_standard(self, folder: str) -> List[Dict]:
+        """
+        List photos using standard folder listing (no date filtering)
+        
+        Args:
+            folder: Folder path
+        
+        Returns:
+            List of photo metadata dictionaries
+        """
+        
         # Build the API endpoint
-        if folder:
-            # Encode the folder path
+        # Check if it's a special folder (photos, documents, cameraroll, etc.)
+        special_folders = ['photos', 'documents', 'cameraroll', 'attachments', 'approot']
+        folder_lower = folder.lower().strip('/')
+        
+        if folder_lower in special_folders:
+            # Use special folder endpoint
+            endpoint = f"/me/drive/special/{folder_lower}/children"
+            print(f"{Fore.CYAN}Using special folder endpoint: {folder_lower}")
+        elif folder:
+            # Regular folder path
             folder_path = folder.strip('/')
             endpoint = f"/me/drive/root:/{folder_path}:/children"
         else:
+            # Root folder
             endpoint = "/me/drive/root/children"
         
         photos = []
@@ -193,34 +331,26 @@ class OneDriveClient:
             
             if not response or response.status_code != 200:
                 print(f"{Fore.RED}Failed to fetch photos: {response.status_code if response else 'No response'}")
+                if response:
+                    print(f"{Fore.RED}Response: {response.text}")
                 break
             
             data = response.json()
             items = data.get('value', [])
             
+            print(f"{Fore.CYAN}Batch {batch_count}: Found {len(items)} items in OneDrive")
+            
             # Filter for images
+            files_found = 0
+            images_found = 0
             for item in items:
                 if item.get('file'):  # It's a file, not a folder
+                    files_found += 1
                     name = item.get('name', '')
                     ext = Path(name).suffix.lower()
                     
                     if ext in image_extensions:
-                        # Apply date filtering if specified
-                        if date_from or date_to:
-                            modified_str = item.get('lastModifiedDateTime', '')
-                            if modified_str:
-                                # Parse ISO datetime
-                                try:
-                                    from datetime import datetime
-                                    modified_date = datetime.fromisoformat(modified_str.replace('Z', '+00:00'))
-                                    modified_date_str = modified_date.strftime('%Y-%m-%d')
-                                    
-                                    if date_from and modified_date_str < date_from:
-                                        continue
-                                    if date_to and modified_date_str > date_to:
-                                        continue
-                                except:
-                                    pass  # If parsing fails, include the file
+                        images_found += 1
                         
                         photos.append({
                             'name': name,
@@ -231,7 +361,7 @@ class OneDriveClient:
                         })
             
             # Progress update
-            print(f"{Fore.CYAN}Batch {batch_count}: Found {len(photos)} photos so far...", end='\r')
+            print(f"{Fore.CYAN}  Files: {files_found}, Images: {images_found}, Matching criteria: {len(photos)}")
             
             # Check for next page
             next_link = data.get('@odata.nextLink')

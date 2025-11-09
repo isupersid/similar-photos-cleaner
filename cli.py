@@ -61,11 +61,14 @@ Examples:
   # OneDrive mode - clean photos from OneDrive
   %(prog)s --onedrive
 
+  # OneDrive special Photos folder (recommended)
+  %(prog)s --onedrive --onedrive-folder "photos"
+
   # OneDrive mode with specific folder
   %(prog)s --onedrive --onedrive-folder "/Pictures"
 
   # OneDrive mode with date filtering
-  %(prog)s --onedrive --date-from 2025-11-01 --date-to 2025-11-30
+  %(prog)s --onedrive --onedrive-folder "photos" --date-from 2025-11-01 --date-to 2025-11-30
 
   # Google Photos mode
   %(prog)s --google-photos
@@ -182,7 +185,7 @@ Examples:
         '--onedrive-folder',
         type=str,
         default='',
-        help='OneDrive folder to process (default: root folder)'
+        help='OneDrive folder to process (default: root, use "photos" for Photos special folder)'
     )
     
     parser.add_argument(
