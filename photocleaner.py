@@ -204,9 +204,9 @@ class PhotoCleaner:
         valid_files = []
         
         for file_path in files_to_delete:
-            # For Dropbox mode, we need to check if file exists in Dropbox
-            if self.dropbox_mode:
-                # In Dropbox mode, paths are Dropbox paths
+            # For cloud modes, paths are cloud paths
+            if self.dropbox_mode or self.google_photos_mode:
+                # In cloud modes, paths are cloud paths
                 valid_files.append(file_path)
                 # We can't easily check size without downloading, so just add to list
             else:
@@ -253,6 +253,14 @@ class PhotoCleaner:
                         print(f"{Fore.GREEN}✓ Moved to Dropbox trash: {file_path}")
                     else:
                         raise Exception("Failed to move to trash")
+                
+                elif self.google_photos_mode:
+                    # Google Photos - API doesn't support deletion
+                    # Just list what would be deleted
+                    print(f"{Fore.YELLOW}⚠️  Identified for deletion: {file_path}")
+                    print(f"{Fore.YELLOW}   (Manual deletion required from Google Photos)")
+                    deleted_count += 1
+                
                 else:
                     # Local deletion
                     file_size = file_path.stat().st_size
@@ -283,9 +291,16 @@ class PhotoCleaner:
         print(f"\n{Fore.CYAN}{'='*80}")
         print(f"{Fore.CYAN}DELETION SUMMARY")
         print(f"{Fore.CYAN}{'='*80}")
-        print(f"{Fore.GREEN}✓ Successfully deleted: {deleted_count} files")
-        if not self.dropbox_mode:
-            print(f"{Fore.GREEN}✓ Space freed: {self.format_size(space_freed)}")
+        
+        if self.google_photos_mode:
+            print(f"{Fore.YELLOW}✓ Identified for deletion: {deleted_count} files")
+            print(f"{Fore.YELLOW}⚠️  Google Photos API doesn't support automated deletion")
+            print(f"{Fore.YELLOW}⚠️  Please manually delete these photos from Google Photos")
+        else:
+            print(f"{Fore.GREEN}✓ Successfully deleted: {deleted_count} files")
+            if not self.dropbox_mode:
+                print(f"{Fore.GREEN}✓ Space freed: {self.format_size(space_freed)}")
+        
         if failed_count > 0:
             print(f"{Fore.RED}✗ Failed: {failed_count} files")
         print(f"{Fore.CYAN}{'='*80}\n")
