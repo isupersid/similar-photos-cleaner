@@ -35,8 +35,8 @@ class StorageProvider(ABC):
         pass
     
     @abstractmethod
-    def delete_photo(self, photo_path: str) -> bool:
-        """Delete a photo from the storage provider"""
+    def delete_photo(self, photo_path: str, cloud_id: str = None) -> bool:
+        """Delete a photo from the storage provider (with optional cloud_id for OneDrive)"""
         pass
     
     @abstractmethod
@@ -125,7 +125,7 @@ class LocalStorageProvider(StorageProvider):
         """Local storage doesn't need to download"""
         return True
     
-    def delete_photo(self, photo_path: str) -> bool:
+    def delete_photo(self, photo_path: str, cloud_id: str = None) -> bool:
         """Delete a local file"""
         try:
             Path(photo_path).unlink()
@@ -172,7 +172,7 @@ class DropboxStorageProvider(StorageProvider):
         """Download a photo from Dropbox"""
         return self.client.download_photo(photo_metadata['path'], output_path)
     
-    def delete_photo(self, photo_path: str) -> bool:
+    def delete_photo(self, photo_path: str, cloud_id: str = None) -> bool:
         """Move photo to Dropbox trash folder"""
         return self.client.move_photo_to_trash(photo_path)
     
@@ -213,7 +213,7 @@ class GooglePhotosStorageProvider(StorageProvider):
         """Download a photo from Google Photos"""
         return self.client.download_photo(photo_metadata['url'], output_path)
     
-    def delete_photo(self, photo_path: str) -> bool:
+    def delete_photo(self, photo_path: str, cloud_id: str = None) -> bool:
         """Google Photos doesn't support automated deletion"""
         # Just return False to indicate it wasn't deleted
         # The calling code will handle this appropriately
@@ -255,21 +255,27 @@ class OneDriveStorageProvider(StorageProvider):
     
     def download_photo(self, photo_metadata: Dict, output_path: Path) -> bool:
         """Download a photo from OneDrive"""
-        return self.client.download_photo(photo_metadata['path'], output_path)
+        return self.client.download_photo(photo_metadata, output_path)
     
-    def delete_photo(self, photo_path: str) -> bool:
+    def delete_photo(self, photo_path: str, cloud_id: str = None) -> bool:
         """Move photo to OneDrive trash folder"""
-        # Extract item ID from metadata
-        # In fast mode, we need to get the ID from the path
-        # This is a limitation - we'll need the item ID
-        # For now, use move_photo_to_trash which requires ID
-        # We'll need to store the ID in metadata
+        # The photo_path from JSON is the OneDrive path (e.g., "/photos/image.jpg")
+        # First try using the provided cloud_id (from fast mode JSON)
+        if cloud_id:
+            return self.client.move_photo_to_trash(cloud_id)
+        
+        # Otherwise, look up the item ID from our metadata (from normal mode)
         for temp_path, metadata in self.photo_metadata.items():
-            cloud_path = metadata.get('onedrive_path')
-            if cloud_path == photo_path:
+            stored_path = metadata.get('path')
+            if stored_path == photo_path:
                 item_id = metadata.get('id')
                 if item_id:
                     return self.client.move_photo_to_trash(item_id)
+        
+        # If not found in metadata, it means we're in fast mode without cloud_id
+        # This shouldn't happen if the JSON was generated correctly
+        print(f"{Fore.YELLOW}Warning: Cannot delete {photo_path} - item ID not found")
+        print(f"{Fore.YELLOW}Make sure the JSON file was generated from OneDrive mode")
         return False
     
     def get_display_name(self) -> str:
@@ -282,11 +288,7 @@ class OneDriveStorageProvider(StorageProvider):
         """Get OneDrive path for a temporary file"""
         metadata = self.photo_metadata.get(str(temp_path))
         if metadata:
-            # Create a display path from folder + name
-            folder = self.folder or ''
-            name = metadata.get('name', '')
-            if folder:
-                return f"{folder}/{name}"
-            return f"/{name}"
+            # Return the stored OneDrive path
+            return metadata.get('path')
         return None
 

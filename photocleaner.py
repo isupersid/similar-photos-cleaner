@@ -136,25 +136,28 @@ class PhotoCleaner:
             
             # Convert the decisions format for easier lookup
             # From: {"group_id": {"keep": [paths_or_objects], "delete": [paths_or_objects]}}
-            # To: {path: {'action': action, 'size': size}} for quick lookup
+            # To: {path: {'action': action, 'size': size, 'cloud_id': id}} for quick lookup
             self.decision_map = {}
             
             for group_id, actions in self.custom_decisions.items():
                 for action_type in ['keep', 'delete']:
                     for item in actions.get(action_type, []):
-                        # Handle both old format (string) and new format (object with path and size)
+                        # Handle both old format (string) and new format (object with path, size, and cloud_id)
                         if isinstance(item, str):
                             # Old format: just a path string
                             path = item
                             size = None
+                            cloud_id = None
                         else:
-                            # New format: object with path and size
+                            # New format: object with path, size, and optionally cloud_id
                             path = item.get('path', item)
                             size = item.get('size')
+                            cloud_id = item.get('cloud_id')
                         
                         self.decision_map[str(path)] = {
                             'action': action_type,
-                            'size': size
+                            'size': size,
+                            'cloud_id': cloud_id
                         }
             
             print(f"{Fore.GREEN}✓ Loaded decisions for {len(self.custom_decisions)} groups")
@@ -271,9 +274,12 @@ class PhotoCleaner:
         
         for file_path in valid_files:
             try:
+                # Get cloud_id from decision map if available (for OneDrive fast mode)
+                cloud_id = self.decision_map.get(str(file_path), {}).get('cloud_id')
+                
                 if not is_local:
-                    # Cloud deletion (Dropbox or Google Photos)
-                    success = self.storage.delete_photo(str(file_path))
+                    # Cloud deletion (Dropbox, Google Photos, or OneDrive)
+                    success = self.storage.delete_photo(str(file_path), cloud_id=cloud_id)
                     
                     if self.storage.supports_automated_deletion():
                         if success:

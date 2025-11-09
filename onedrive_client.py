@@ -253,10 +253,18 @@ class OneDriveClient:
                             pass  # Include if date parsing fails
                     
                     if include:
+                        # Get the actual OneDrive path (not download URL)
+                        parent_path = item.get('parentReference', {}).get('path', '')
+                        # Remove /drive/root: prefix if present
+                        if parent_path.startswith('/drive/root:'):
+                            parent_path = parent_path[12:]  # Remove '/drive/root:'
+                        onedrive_path = f"{parent_path}/{name}".replace('//', '/')
+                        
                         photos.append({
                             'name': name,
                             'id': item.get('id'),
-                            'path': item.get('@microsoft.graph.downloadUrl', ''),
+                            'path': onedrive_path,  # Store OneDrive path, not download URL
+                            'download_url': item.get('@microsoft.graph.downloadUrl', ''),  # Store download URL separately
                             'size': item.get('size', 0),
                             'modified': modified_str
                         })
@@ -387,10 +395,18 @@ class OneDriveClient:
                     if ext in image_extensions:
                         images_found += 1
                         
+                        # Get the actual OneDrive path (not download URL)
+                        parent_path = item.get('parentReference', {}).get('path', '')
+                        # Remove /drive/root: prefix if present
+                        if parent_path.startswith('/drive/root:'):
+                            parent_path = parent_path[12:]  # Remove '/drive/root:'
+                        onedrive_path = f"{parent_path}/{name}".replace('//', '/')
+                        
                         photos.append({
                             'name': name,
                             'id': item.get('id'),
-                            'path': item.get('@microsoft.graph.downloadUrl', ''),
+                            'path': onedrive_path,  # Store OneDrive path, not download URL
+                            'download_url': item.get('@microsoft.graph.downloadUrl', ''),  # Store download URL separately
                             'size': item.get('size', 0),
                             'modified': item.get('lastModifiedDateTime', '')
                         })
@@ -406,17 +422,24 @@ class OneDriveClient:
         print(f"\n{Fore.GREEN}Found {len(photos)} photos in OneDrive")
         return photos
     
-    def download_photo(self, download_url: str, output_path: Path) -> bool:
+    def download_photo(self, photo_metadata: Dict, output_path: Path) -> bool:
         """
         Download a photo from OneDrive
         
         Args:
-            download_url: Direct download URL from photo metadata
+            photo_metadata: Photo metadata dict containing 'download_url' or 'path' (for backward compatibility)
             output_path: Local path to save the photo
         
         Returns:
             True if successful, False otherwise
         """
+        # Get download URL from metadata (prefer 'download_url', fallback to 'path' for backward compatibility)
+        download_url = photo_metadata.get('download_url') or photo_metadata.get('path', '')
+        
+        if not download_url:
+            print(f"{Fore.RED}No download URL found in metadata")
+            return False
+        
         try:
             response = requests.get(download_url, stream=True)
             if response.status_code == 200:

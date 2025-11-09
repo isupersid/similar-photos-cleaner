@@ -572,11 +572,12 @@ class HTMLReportGenerator:
             # Add best image (to keep)
             keep_thumbnail = self.image_to_base64(keep_path)
             
-            # Use Dropbox path for data-path if available, otherwise use local path
-            keep_data_path = keep_quality.get('dropbox_path', keep_path)
+            # Use cloud path for data-path if available, otherwise use local path
+            keep_data_path = keep_quality.get('cloud_path') or keep_quality.get('dropbox_path', keep_path)
+            keep_cloud_id = keep_quality.get('cloud_id', '')
             
             html_parts.append(f"""
-                        <div class="image-card keep" data-path="{keep_data_path}" data-group="{idx}" data-size="{keep_path.stat().st_size}">
+                        <div class="image-card keep" data-path="{keep_data_path}" data-id="{keep_cloud_id}" data-group="{idx}" data-size="{keep_path.stat().st_size}">
                             <button class="rotate-btn" onclick="rotateImage(this)" title="Rotate 90°">↻</button>
                             <button class="toggle-btn" onclick="toggleKeepDelete(this)">Change to Delete</button>
                             <div class="image-header">✓ Keep</div>
@@ -608,11 +609,12 @@ class HTMLReportGenerator:
             for img_path, quality in to_delete:
                 thumbnail = self.image_to_base64(img_path)
                 
-                # Use Dropbox path for data-path if available, otherwise use local path
-                img_data_path = quality.get('dropbox_path', img_path)
+                # Use cloud path for data-path if available, otherwise use local path
+                img_data_path = quality.get('cloud_path') or quality.get('dropbox_path', img_path)
+                img_cloud_id = quality.get('cloud_id', '')
                 
                 html_parts.append(f"""
-                        <div class="image-card delete" data-path="{img_data_path}" data-group="{idx}" data-size="{img_path.stat().st_size}">
+                        <div class="image-card delete" data-path="{img_data_path}" data-id="{img_cloud_id}" data-group="{idx}" data-size="{img_path.stat().st_size}">
                             <button class="rotate-btn" onclick="rotateImage(this)" title="Rotate 90°">↻</button>
                             <button class="toggle-btn" onclick="toggleKeepDelete(this)">Change to Keep</button>
                             <div class="image-header">✗ Delete</div>
@@ -864,6 +866,7 @@ class HTMLReportGenerator:
             
             document.querySelectorAll('.image-card').forEach(card => {{
                 const path = card.getAttribute('data-path');
+                const cloudId = card.getAttribute('data-id');
                 const group = card.getAttribute('data-group');
                 const size = parseInt(card.getAttribute('data-size')) || 0;
                 const action = card.classList.contains('keep') ? 'keep' : 'delete';
@@ -871,8 +874,13 @@ class HTMLReportGenerator:
                 if (!decisions[group]) {{
                     decisions[group] = {{keep: [], delete: []}};
                 }}
-                // Store both path and size as an object
-                decisions[group][action].push({{path: path, size: size}});
+                
+                // Store path, size, and cloud_id (for OneDrive) as an object
+                const item = {{path: path, size: size}};
+                if (cloudId) {{
+                    item.cloud_id = cloudId;
+                }}
+                decisions[group][action].push(item);
             }});
             
             // Create JSON file
@@ -905,15 +913,15 @@ class HTMLReportGenerator:
         Args:
             groups_data: List of group dictionaries
             output_path: Path to save the HTML file
-            photo_metadata: Optional dict mapping temp paths to Dropbox metadata (for Dropbox mode)
+            photo_metadata: Optional dict mapping temp paths to cloud metadata (for Dropbox/OneDrive mode)
         
         Returns:
             True if successful, False otherwise
         """
         try:
-            # If photo_metadata provided (Dropbox mode), replace temp paths with Dropbox paths
+            # If photo_metadata provided (cloud mode), replace temp paths with cloud paths
             if photo_metadata:
-                groups_data = self._replace_with_dropbox_paths(groups_data, photo_metadata)
+                groups_data = self._replace_with_cloud_paths(groups_data, photo_metadata)
             
             html_content = self.generate(groups_data)
             with open(output_path, 'w', encoding='utf-8') as f:
@@ -924,32 +932,49 @@ class HTMLReportGenerator:
             print(f"{Fore.RED}Error saving HTML report: {e}")
             return False
     
-    def _replace_with_dropbox_paths(self, groups_data: List[dict], photo_metadata: dict) -> List[dict]:
-        """Replace temp file paths with Dropbox paths for Dropbox mode"""
+    def _replace_with_cloud_paths(self, groups_data: List[dict], photo_metadata: dict) -> List[dict]:
+        """Replace temp file paths with cloud paths (Dropbox/OneDrive) for cloud mode"""
         updated_groups = []
         
         for group in groups_data:
-            # Keep path: store both temp path (for image reading) and Dropbox path (for JSON)
+            # Keep path: store both temp path (for image reading) and cloud path (for JSON)
             keep_temp_path, keep_quality = group['keep']
-            dropbox_keep_path = photo_metadata.get(str(keep_temp_path), {}).get('path', str(keep_temp_path))
+            metadata = photo_metadata.get(str(keep_temp_path), {})
+            cloud_keep_path = metadata.get('path', str(keep_temp_path))
             
-            # Store temp path for image reading, but add dropbox_path to quality dict
+            # Store temp path for image reading, but add cloud_path to quality dict
             keep_quality_with_path = keep_quality.copy()
-            keep_quality_with_path['dropbox_path'] = dropbox_keep_path
+            # Use generic 'cloud_path' and 'cloud_id' keys for both Dropbox and OneDrive
+            keep_quality_with_path['cloud_path'] = cloud_keep_path
+            # Also support legacy 'dropbox_path' key for backward compatibility
+            keep_quality_with_path['dropbox_path'] = cloud_keep_path
+            
+            # Store item ID if available (needed for OneDrive deletion)
+            if 'id' in metadata:
+                keep_quality_with_path['cloud_id'] = metadata['id']
             
             updated_delete = []
             for del_temp_path, del_quality in group['delete']:
-                dropbox_del_path = photo_metadata.get(str(del_temp_path), {}).get('path', str(del_temp_path))
+                metadata = photo_metadata.get(str(del_temp_path), {})
+                cloud_del_path = metadata.get('path', str(del_temp_path))
                 
-                # Store temp path for image reading, but add dropbox_path to quality dict
+                # Store temp path for image reading, but add cloud_path to quality dict
                 del_quality_with_path = del_quality.copy()
-                del_quality_with_path['dropbox_path'] = dropbox_del_path
+                del_quality_with_path['cloud_path'] = cloud_del_path
+                # Also support legacy 'dropbox_path' key for backward compatibility
+                del_quality_with_path['dropbox_path'] = cloud_del_path
+                
+                # Store item ID if available (needed for OneDrive deletion)
+                if 'id' in metadata:
+                    del_quality_with_path['cloud_id'] = metadata['id']
+                
                 updated_delete.append((del_temp_path, del_quality_with_path))
             
             updated_groups.append({
                 'keep': (keep_temp_path, keep_quality_with_path),
                 'delete': updated_delete
             })
+        
         
         return updated_groups
 
