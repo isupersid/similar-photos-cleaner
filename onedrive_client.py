@@ -252,6 +252,20 @@ class OneDriveClient:
         # Get all photos from standard listing
         all_photos = self._list_photos_standard(folder)
         
+        # Debug: Show sample dates from photos
+        if len(all_photos) > 0:
+            print(f"\n{Fore.CYAN}[Debug] Sample dates from your photos (first 10):")
+            for i, photo in enumerate(all_photos[:10]):
+                modified_str = photo.get('modified', 'No date')
+                try:
+                    modified_date = datetime.fromisoformat(modified_str.replace('Z', '+00:00'))
+                    modified_date_str = modified_date.strftime('%Y-%m-%d')
+                    print(f"{Fore.CYAN}  {photo.get('name', 'unknown')[:40]:40s} -> {modified_date_str}")
+                except:
+                    print(f"{Fore.CYAN}  {photo.get('name', 'unknown')[:40]:40s} -> {modified_str}")
+            print(f"{Fore.YELLOW}[Debug] Your date filter: {date_from} to {date_to}")
+            print(f"{Fore.YELLOW}[Debug] Tip: Use dates from 2024 or earlier if your photos are old\n")
+        
         # Filter by date
         if not date_from and not date_to:
             return all_photos
