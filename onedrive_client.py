@@ -216,6 +216,9 @@ class OneDriveClient:
         """
         Search for photos using Microsoft Graph Photos API with date filtering
         
+        Note: The special photos folder doesn't support OData $filter queries,
+        so we use client-side filtering instead.
+        
         Args:
             folder: Folder path (not used for photos API, searches all photos)
             date_from: Start date (YYYY-MM-DD)
@@ -224,121 +227,11 @@ class OneDriveClient:
         Returns:
             List of photo metadata dictionaries
         """
-        from datetime import datetime
+        print(f"{Fore.CYAN}Using Microsoft Graph Photos API with client-side date filtering...")
         
-        print(f"{Fore.CYAN}Using Microsoft Graph Photos API...")
-        
-        # Try using OData $filter query parameter for server-side filtering
-        # Build filter expression
-        filter_parts = []
-        if date_from:
-            filter_parts.append(f"lastModifiedDateTime ge {date_from}T00:00:00Z")
-        if date_to:
-            filter_parts.append(f"lastModifiedDateTime le {date_to}T23:59:59Z")
-        
-        filter_query = " and ".join(filter_parts) if filter_parts else None
-        
-        # Use the /me/photos endpoint which returns items with image metadata
-        # This endpoint automatically filters to just photos
-        endpoint = "/me/drive/special/photos/children"
-        if filter_query:
-            # Try adding OData filter
-            endpoint += f"?$filter={filter_query}"
-            print(f"{Fore.CYAN}Attempting server-side date filter: {filter_query}")
-        
-        photos = []
-        next_link = None
-        batch_count = 0
-        
-        while True:
-            batch_count += 1
-            
-            if next_link:
-                response = requests.get(
-                    next_link,
-                    headers={'Authorization': f'Bearer {self.access_token}'}
-                )
-            else:
-                # Use the photos view endpoint
-                response = self._make_request('GET', endpoint)
-            
-            if not response or response.status_code != 200:
-                print(f"{Fore.YELLOW}Photos API with server-side filtering not available")
-                print(f"{Fore.YELLOW}  Status: {response.status_code if response else 'No response'}")
-                if response:
-                    print(f"{Fore.YELLOW}  Endpoint: {endpoint}")
-                    try:
-                        error_data = response.json()
-                        print(f"{Fore.YELLOW}  Error: {error_data.get('error', {}).get('code', 'Unknown')}")
-                        print(f"{Fore.YELLOW}  Message: {error_data.get('error', {}).get('message', 'No message')}")
-                    except:
-                        print(f"{Fore.YELLOW}  Response: {response.text[:200] if response.text else 'Empty'}")
-                print(f"{Fore.CYAN}Falling back to client-side filtering...")
-                # Fallback to standard listing with client-side filtering
-                return self._list_photos_standard_with_date_filter(folder, date_from, date_to)
-            
-            data = response.json()
-            items = data.get('value', [])
-            
-            print(f"{Fore.CYAN}Batch {batch_count}: Found {len(items)} photos")
-            
-            # Debug: Show sample dates from first batch
-            if batch_count == 1 and len(items) > 0:
-                sample_dates = []
-                for i, item in enumerate(items[:5]):  # Show first 5
-                    modified_str = item.get('lastModifiedDateTime', 'No date')
-                    sample_dates.append(f"{item.get('name', 'unknown')}: {modified_str}")
-                print(f"{Fore.CYAN}[Debug] Sample dates from first 5 photos:")
-                for date_info in sample_dates:
-                    print(f"{Fore.CYAN}  {date_info}")
-                print(f"{Fore.CYAN}[Debug] Date range filter: {date_from} to {date_to}")
-            
-            # Filter by date
-            for item in items:
-                if item.get('file'):
-                    name = item.get('name', '')
-                    modified_str = item.get('lastModifiedDateTime', '')
-                    
-                    # Apply date filtering
-                    include = True
-                    if (date_from or date_to) and modified_str:
-                        try:
-                            modified_date = datetime.fromisoformat(modified_str.replace('Z', '+00:00'))
-                            modified_date_str = modified_date.strftime('%Y-%m-%d')
-                            
-                            if date_from and modified_date_str < date_from:
-                                include = False
-                            if date_to and modified_date_str > date_to:
-                                include = False
-                        except:
-                            pass  # Include if date parsing fails
-                    
-                    if include:
-                        # Get the actual OneDrive path (not download URL)
-                        parent_path = item.get('parentReference', {}).get('path', '')
-                        # Remove /drive/root: prefix if present
-                        if parent_path.startswith('/drive/root:'):
-                            parent_path = parent_path[12:]  # Remove '/drive/root:'
-                        onedrive_path = f"{parent_path}/{name}".replace('//', '/')
-                        
-                        photos.append({
-                            'name': name,
-                            'id': item.get('id'),
-                            'path': onedrive_path,  # Store OneDrive path, not download URL
-                            'download_url': item.get('@microsoft.graph.downloadUrl', ''),  # Store download URL separately
-                            'size': item.get('size', 0),
-                            'modified': modified_str
-                        })
-            
-            print(f"{Fore.CYAN}  Photos in date range: {len(photos)}")
-            
-            # Check for next page
-            next_link = data.get('@odata.nextLink')
-            if not next_link:
-                break
-        
-        print(f"\n{Fore.GREEN}Found {len(photos)} photos matching criteria")
-        return photos
+        # Note: Server-side $filter doesn't work on special/photos/children endpoint
+        # Fallback to client-side filtering directly
+        return self._list_photos_standard_with_date_filter(folder, date_from, date_to)
     
     def _list_photos_standard_with_date_filter(self, folder: str, date_from: str = None, date_to: str = None) -> List[Dict]:
         """
