@@ -95,33 +95,14 @@ class OneDriveClient:
         print(f"{Fore.CYAN}{flow['message']}")
         print(f"{Fore.YELLOW}{'='*80}\n")
         
-        # Try to open browser automatically with pre-filled code
-        # Microsoft provides 'verification_uri' (manual entry) and may provide a complete URL with code
-        verification_url_complete = flow.get('verification_uri_complete')
+        # Try to open browser automatically
         verification_url = flow.get('verification_uri', '')
         user_code = flow.get('user_code', '')
         
-        # If no complete URL provided, try to construct one
-        if not verification_url_complete and verification_url and user_code:
-            # Try Microsoft's OTC (One Time Code) parameter format
-            verification_url_complete = f"{verification_url}?otc={user_code}"
-            print(f"{Fore.CYAN}[Debug] Constructed complete URL with code: {verification_url_complete}")
-        
-        if verification_url_complete:
-            # Use the complete URL with code pre-filled (best user experience)
+        if verification_url:
             try:
                 import webbrowser
-                print(f"{Fore.GREEN}Opening browser with pre-filled code...")
-                print(f"{Fore.CYAN}URL: {verification_url_complete}")
-                webbrowser.open(verification_url_complete)
-            except Exception as e:
-                print(f"{Fore.YELLOW}Could not open browser automatically: {e}")
-                print(f"{Fore.YELLOW}Please open the URL manually: {verification_url_complete}")
-        elif verification_url:
-            # Fallback: Use basic URL (user must enter code manually)
-            try:
-                import webbrowser
-                print(f"{Fore.GREEN}Opening browser (you'll need to enter the code)...")
+                print(f"{Fore.GREEN}Opening browser automatically...")
                 print(f"{Fore.CYAN}URL: {verification_url}")
                 print(f"{Fore.YELLOW}Code to enter: {user_code}")
                 webbrowser.open(verification_url)
