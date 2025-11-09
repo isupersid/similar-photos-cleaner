@@ -92,6 +92,17 @@ class OneDriveClient:
         print(f"{Fore.CYAN}{flow['message']}")
         print(f"{Fore.YELLOW}{'='*80}\n")
         
+        # Try to open browser automatically
+        verification_url = flow.get('verification_uri', '')
+        if verification_url:
+            try:
+                import webbrowser
+                print(f"{Fore.GREEN}Opening browser automatically...")
+                webbrowser.open(verification_url)
+            except Exception as e:
+                print(f"{Fore.YELLOW}Could not open browser automatically: {e}")
+                print(f"{Fore.YELLOW}Please open the URL manually: {verification_url}")
+        
         # Wait for user to authenticate
         try:
             result = self.app.acquire_token_by_device_flow(flow)
