@@ -576,7 +576,7 @@ class HTMLReportGenerator:
             keep_data_path = keep_quality.get('dropbox_path', keep_path)
             
             html_parts.append(f"""
-                        <div class="image-card keep" data-path="{keep_data_path}" data-group="{idx}">
+                        <div class="image-card keep" data-path="{keep_data_path}" data-group="{idx}" data-size="{keep_path.stat().st_size}">
                             <button class="rotate-btn" onclick="rotateImage(this)" title="Rotate 90°">↻</button>
                             <button class="toggle-btn" onclick="toggleKeepDelete(this)">Change to Delete</button>
                             <div class="image-header">✓ Keep</div>
@@ -612,7 +612,7 @@ class HTMLReportGenerator:
                 img_data_path = quality.get('dropbox_path', img_path)
                 
                 html_parts.append(f"""
-                        <div class="image-card delete" data-path="{img_data_path}" data-group="{idx}">
+                        <div class="image-card delete" data-path="{img_data_path}" data-group="{idx}" data-size="{img_path.stat().st_size}">
                             <button class="rotate-btn" onclick="rotateImage(this)" title="Rotate 90°">↻</button>
                             <button class="toggle-btn" onclick="toggleKeepDelete(this)">Change to Keep</button>
                             <div class="image-header">✗ Delete</div>
@@ -865,12 +865,14 @@ class HTMLReportGenerator:
             document.querySelectorAll('.image-card').forEach(card => {{
                 const path = card.getAttribute('data-path');
                 const group = card.getAttribute('data-group');
+                const size = parseInt(card.getAttribute('data-size')) || 0;
                 const action = card.classList.contains('keep') ? 'keep' : 'delete';
                 
                 if (!decisions[group]) {{
                     decisions[group] = {{keep: [], delete: []}};
                 }}
-                decisions[group][action].push(path);
+                // Store both path and size as an object
+                decisions[group][action].push({{path: path, size: size}});
             }});
             
             // Create JSON file

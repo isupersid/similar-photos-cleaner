@@ -135,14 +135,27 @@ class PhotoCleaner:
                 self.custom_decisions = json.load(f)
             
             # Convert the decisions format for easier lookup
-            # From: {"group_id": {"keep": [paths], "delete": [paths]}}
-            # To: {path: action} for quick lookup
+            # From: {"group_id": {"keep": [paths_or_objects], "delete": [paths_or_objects]}}
+            # To: {path: {'action': action, 'size': size}} for quick lookup
             self.decision_map = {}
+            
             for group_id, actions in self.custom_decisions.items():
-                for path in actions.get('keep', []):
-                    self.decision_map[str(path)] = 'keep'
-                for path in actions.get('delete', []):
-                    self.decision_map[str(path)] = 'delete'
+                for action_type in ['keep', 'delete']:
+                    for item in actions.get(action_type, []):
+                        # Handle both old format (string) and new format (object with path and size)
+                        if isinstance(item, str):
+                            # Old format: just a path string
+                            path = item
+                            size = None
+                        else:
+                            # New format: object with path and size
+                            path = item.get('path', item)
+                            size = item.get('size')
+                        
+                        self.decision_map[str(path)] = {
+                            'action': action_type,
+                            'size': size
+                        }
             
             print(f"{Fore.GREEN}✓ Loaded decisions for {len(self.custom_decisions)} groups")
             print(f"{Fore.YELLOW}⚠️  Using custom decisions instead of AI recommendations")
@@ -162,13 +175,27 @@ class PhotoCleaner:
         # Collect all files to delete from the decisions
         files_to_delete = []
         files_to_keep = []
+        file_sizes = {}  # Map path to size
         
         for group_id, actions in self.custom_decisions.items():
-            keep_files = actions.get('keep', [])
-            delete_files = actions.get('delete', [])
+            # Handle both old format (strings) and new format (objects)
+            for item in actions.get('keep', []):
+                if isinstance(item, str):
+                    path = Path(item)
+                else:
+                    path = Path(item.get('path', item))
+                    if item.get('size'):
+                        file_sizes[str(path)] = item['size']
+                files_to_keep.append(path)
             
-            files_to_keep.extend([Path(p) for p in keep_files])
-            files_to_delete.extend([Path(p) for p in delete_files])
+            for item in actions.get('delete', []):
+                if isinstance(item, str):
+                    path = Path(item)
+                else:
+                    path = Path(item.get('path', item))
+                    if item.get('size'):
+                        file_sizes[str(path)] = item['size']
+                files_to_delete.append(path)
         
         print(f"{Fore.GREEN}Loaded decisions:")
         print(f"  • {len(self.custom_decisions)} groups")
@@ -186,10 +213,24 @@ class PhotoCleaner:
             if not is_local:
                 # In cloud modes, paths are cloud paths
                 valid_files.append(file_path)
-                # We can't easily check size without downloading, so just add to list
+                
+                # Try to get file size from the JSON file first
+                file_path_str = str(file_path)
+                if file_path_str in file_sizes:
+                    total_space += file_sizes[file_path_str]
+                # Fallback to metadata if available (shouldn't be needed with new JSON format)
+                elif hasattr(self.storage, 'photo_metadata') and file_path_str in self.storage.photo_metadata:
+                    metadata = self.storage.photo_metadata[file_path_str]
+                    # Dropbox stores size in 'size' field
+                    if 'size' in metadata:
+                        total_space += metadata['size']
             else:
-                # For local files, verify they exist
-                if file_path.exists():
+                # For local files, prefer size from JSON, then verify they exist
+                file_path_str = str(file_path)
+                if file_path_str in file_sizes:
+                    total_space += file_sizes[file_path_str]
+                    valid_files.append(file_path)
+                elif file_path.exists():
                     total_space += file_path.stat().st_size
                     valid_files.append(file_path)
                 else:
@@ -199,7 +240,13 @@ class PhotoCleaner:
             print(f"{Fore.YELLOW}No valid files to delete found!")
             return
         
-        print(f"\n{Fore.CYAN}Space to save: {self.format_size(total_space)}")
+        # Display space information
+        if is_local or total_space > 0:
+            print(f"\n{Fore.CYAN}Space to save: {self.format_size(total_space)}")
+        else:
+            # Cloud mode without metadata (fast mode with --apply-decisions)
+            print(f"\n{Fore.CYAN}Files to delete: {len(valid_files)}")
+            print(f"{Fore.YELLOW}(Space calculation unavailable in fast mode for cloud storage)")
         
         if self.dry_run:
             print(f"\n{Fore.YELLOW}{'='*80}")
@@ -527,11 +574,11 @@ class PhotoCleaner:
             
             for img_path in group:
                 path_str = str(img_path)
-                action = self.decision_map.get(path_str)
+                decision_info = self.decision_map.get(path_str)
                 
-                if action == 'keep':
+                if decision_info and decision_info['action'] == 'keep':
                     keep_files.append(img_path)
-                elif action == 'delete':
+                elif decision_info and decision_info['action'] == 'delete':
                     delete_files.append(img_path)
                 else:
                     # If not in decisions (shouldn't happen), default to delete
