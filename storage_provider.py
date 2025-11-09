@@ -258,11 +258,11 @@ class OneDriveStorageProvider(StorageProvider):
         return self.client.download_photo(photo_metadata, output_path)
     
     def delete_photo(self, photo_path: str, cloud_id: str = None) -> bool:
-        """Move photo to OneDrive trash folder"""
+        """Delete photo from OneDrive (sends to OneDrive Recycle Bin)"""
         # The photo_path from JSON is the OneDrive path (e.g., "/photos/image.jpg")
         # First try using the provided cloud_id (from fast mode JSON)
         if cloud_id:
-            return self.client.move_photo_to_trash(cloud_id)
+            return self.client.delete_photo(cloud_id)
         
         # Otherwise, look up the item ID from our metadata (from normal mode)
         for temp_path, metadata in self.photo_metadata.items():
@@ -270,7 +270,7 @@ class OneDriveStorageProvider(StorageProvider):
             if stored_path == photo_path:
                 item_id = metadata.get('id')
                 if item_id:
-                    return self.client.move_photo_to_trash(item_id)
+                    return self.client.delete_photo(item_id)
         
         # If not found in metadata, it means we're in fast mode without cloud_id
         # This shouldn't happen if the JSON was generated correctly
