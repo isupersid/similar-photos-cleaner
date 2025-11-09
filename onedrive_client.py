@@ -173,10 +173,13 @@ class OneDriveClient:
     
     def _search_photos_by_date(self, folder: str, date_from: str = None, date_to: str = None) -> List[Dict]:
         """
-        Search for photos using Microsoft Graph Search API with date filtering
+        Search for photos using Microsoft Graph Photos API with date filtering
+        
+        Microsoft Graph has a dedicated photos collection that uses image metadata.
+        Endpoint: /me/photos
         
         Args:
-            folder: Folder path
+            folder: Folder path (not used for photos API, searches all photos)
             date_from: Start date (YYYY-MM-DD)
             date_to: End date (YYYY-MM-DD)
         
@@ -185,39 +188,12 @@ class OneDriveClient:
         """
         from datetime import datetime
         
-        # Build search query
-        # Microsoft Graph uses ISO 8601 format for dates
-        queries = []
+        print(f"{Fore.CYAN}Using Microsoft Graph Photos API...")
         
-        # Add file type filter for images
-        image_extensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp', 'heic', 'heif']
-        extension_query = ' OR '.join([f'fileExtension:{ext}' for ext in image_extensions])
+        # Use the /me/photos endpoint which returns items with image metadata
+        # This endpoint automatically filters to just photos
+        endpoint = "/me/drive/root/view.photos"
         
-        # Add date range filters
-        if date_from:
-            # Convert to ISO 8601 datetime (start of day)
-            date_obj = datetime.strptime(date_from, '%Y-%m-%d')
-            iso_date = date_obj.strftime('%Y-%m-%dT00:00:00Z')
-            queries.append(f'lastModifiedDateTime>={iso_date}')
-        
-        if date_to:
-            # Convert to ISO 8601 datetime (end of day)
-            date_obj = datetime.strptime(date_to, '%Y-%m-%d')
-            iso_date = date_obj.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%dT23:59:59Z')
-            queries.append(f'lastModifiedDateTime<={iso_date}')
-        
-        # Combine queries
-        query_string = f"({extension_query})"
-        if queries:
-            query_string += ' AND ' + ' AND '.join(queries)
-        
-        print(f"{Fore.CYAN}Search query: {query_string}")
-        
-        # Prepare search request
-        endpoint = "/me/drive/root/search(q='')"
-        
-        # Use POST request with search query in body for complex queries
-        # Or use GET with query parameter
         photos = []
         next_link = None
         batch_count = 0
@@ -231,55 +207,103 @@ class OneDriveClient:
                     headers={'Authorization': f'Bearer {self.access_token}'}
                 )
             else:
-                # Build search URL with query
-                import urllib.parse
-                encoded_query = urllib.parse.quote(query_string)
-                search_endpoint = f"/me/drive/root/search(q='{encoded_query}')"
-                response = self._make_request('GET', search_endpoint)
+                # Use the photos view endpoint
+                response = self._make_request('GET', endpoint)
             
             if not response or response.status_code != 200:
-                print(f"{Fore.RED}Search failed: {response.status_code if response else 'No response'}")
-                if response:
-                    print(f"{Fore.RED}Response: {response.text}")
-                break
+                print(f"{Fore.YELLOW}Photos API not available (status: {response.status_code if response else 'No response'})")
+                print(f"{Fore.CYAN}Falling back to standard search...")
+                # Fallback to standard listing with client-side filtering
+                return self._list_photos_standard_with_date_filter(folder, date_from, date_to)
             
             data = response.json()
             items = data.get('value', [])
             
-            print(f"{Fore.CYAN}Batch {batch_count}: Found {len(items)} items")
+            print(f"{Fore.CYAN}Batch {batch_count}: Found {len(items)} photos")
             
-            # Process results
+            # Filter by date
             for item in items:
-                if item.get('file'):  # It's a file
+                if item.get('file'):
                     name = item.get('name', '')
-                    ext = Path(name).suffix.lower()
+                    modified_str = item.get('lastModifiedDateTime', '')
                     
-                    # Filter by folder if specified
-                    if folder:
-                        item_path = item.get('parentReference', {}).get('path', '')
-                        folder_lower = folder.lower().strip('/')
-                        
-                        # Check if item is in the specified folder or subfolder
-                        if folder_lower not in item_path.lower():
-                            continue
+                    # Apply date filtering
+                    include = True
+                    if (date_from or date_to) and modified_str:
+                        try:
+                            modified_date = datetime.fromisoformat(modified_str.replace('Z', '+00:00'))
+                            modified_date_str = modified_date.strftime('%Y-%m-%d')
+                            
+                            if date_from and modified_date_str < date_from:
+                                include = False
+                            if date_to and modified_date_str > date_to:
+                                include = False
+                        except:
+                            pass  # Include if date parsing fails
                     
-                    photos.append({
-                        'name': name,
-                        'id': item.get('id'),
-                        'path': item.get('@microsoft.graph.downloadUrl', ''),
-                        'size': item.get('size', 0),
-                        'modified': item.get('lastModifiedDateTime', '')
-                    })
+                    if include:
+                        photos.append({
+                            'name': name,
+                            'id': item.get('id'),
+                            'path': item.get('@microsoft.graph.downloadUrl', ''),
+                            'size': item.get('size', 0),
+                            'modified': modified_str
+                        })
             
-            print(f"{Fore.CYAN}  Total matching photos: {len(photos)}")
+            print(f"{Fore.CYAN}  Photos in date range: {len(photos)}")
             
             # Check for next page
             next_link = data.get('@odata.nextLink')
             if not next_link:
                 break
         
-        print(f"\n{Fore.GREEN}Found {len(photos)} photos matching search criteria")
+        print(f"\n{Fore.GREEN}Found {len(photos)} photos matching criteria")
         return photos
+    
+    def _list_photos_standard_with_date_filter(self, folder: str, date_from: str = None, date_to: str = None) -> List[Dict]:
+        """
+        Fallback: List photos with client-side date filtering
+        
+        Args:
+            folder: Folder path
+            date_from: Start date (YYYY-MM-DD)
+            date_to: End date (YYYY-MM-DD)
+        
+        Returns:
+            List of photo metadata dictionaries
+        """
+        from datetime import datetime
+        
+        print(f"{Fore.CYAN}Using standard folder listing with client-side filtering...")
+        
+        # Get all photos from standard listing
+        all_photos = self._list_photos_standard(folder)
+        
+        # Filter by date
+        if not date_from and not date_to:
+            return all_photos
+        
+        filtered_photos = []
+        for photo in all_photos:
+            modified_str = photo.get('modified', '')
+            if modified_str:
+                try:
+                    modified_date = datetime.fromisoformat(modified_str.replace('Z', '+00:00'))
+                    modified_date_str = modified_date.strftime('%Y-%m-%d')
+                    
+                    if date_from and modified_date_str < date_from:
+                        continue
+                    if date_to and modified_date_str > date_to:
+                        continue
+                    
+                    filtered_photos.append(photo)
+                except:
+                    filtered_photos.append(photo)  # Include if parsing fails
+            else:
+                filtered_photos.append(photo)  # Include if no date
+        
+        print(f"{Fore.GREEN}Filtered to {len(filtered_photos)} photos in date range")
+        return filtered_photos
     
     def _list_photos_standard(self, folder: str) -> List[Dict]:
         """
