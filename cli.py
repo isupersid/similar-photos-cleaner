@@ -16,12 +16,18 @@ except ImportError:
     DROPBOX_AVAILABLE = False
 
 try:
+    from onedrive_client import setup_onedrive_app, create_onedrive_client
+    ONEDRIVE_AVAILABLE = True
+except ImportError:
+    ONEDRIVE_AVAILABLE = False
+
+try:
     from google_photos_client import setup_google_photos, create_google_photos_client
     GOOGLE_PHOTOS_AVAILABLE = True
 except ImportError:
     GOOGLE_PHOTOS_AVAILABLE = False
 
-from storage_provider import LocalStorageProvider, DropboxStorageProvider, GooglePhotosStorageProvider
+from storage_provider import LocalStorageProvider, DropboxStorageProvider, GooglePhotosStorageProvider, OneDriveStorageProvider
 
 
 def create_parser():
@@ -48,6 +54,18 @@ Examples:
 
   # Dropbox mode with date filtering
   %(prog)s --dropbox --date-from 2025-11-01 --date-to 2025-11-30
+
+  # OneDrive mode - setup first
+  %(prog)s --onedrive-setup
+
+  # OneDrive mode - clean photos from OneDrive
+  %(prog)s --onedrive
+
+  # OneDrive mode with specific folder
+  %(prog)s --onedrive --onedrive-folder "/Pictures"
+
+  # OneDrive mode with date filtering
+  %(prog)s --onedrive --date-from 2025-11-01 --date-to 2025-11-30
 
   # Google Photos mode
   %(prog)s --google-photos
@@ -153,6 +171,26 @@ Examples:
         help='[Dropbox only] Use Search API for date filtering (experimental/debug)'
     )
     
+    # OneDrive options
+    parser.add_argument(
+        '--onedrive',
+        action='store_true',
+        help='Use OneDrive cloud storage instead of local directory'
+    )
+    
+    parser.add_argument(
+        '--onedrive-folder',
+        type=str,
+        default='',
+        help='OneDrive folder to process (default: root folder)'
+    )
+    
+    parser.add_argument(
+        '--onedrive-setup',
+        action='store_true',
+        help='Show OneDrive setup instructions'
+    )
+    
     # Google Photos options
     parser.add_argument(
         '--google-photos',
@@ -243,6 +281,24 @@ def create_storage_provider(args):
             use_search_api=args.use_search_api
         )
     
+    elif args.onedrive:
+        # OneDrive mode
+        if not ONEDRIVE_AVAILABLE:
+            print(f"{Fore.RED}Error: OneDrive integration not available.")
+            print(f"{Fore.YELLOW}Install dependencies: pip install msal requests")
+            sys.exit(1)
+        
+        # Authenticate
+        onedrive_client = create_onedrive_client()
+        if not onedrive_client:
+            print(f"{Fore.RED}Failed to authenticate with OneDrive")
+            sys.exit(1)
+        
+        return OneDriveStorageProvider(
+            onedrive_client,
+            folder=args.onedrive_folder
+        )
+    
     elif args.google_photos:
         # Google Photos mode
         if not GOOGLE_PHOTOS_AVAILABLE:
@@ -277,6 +333,15 @@ def handle_setup_commands(args):
         else:
             print(f"{Fore.RED}Dropbox integration not available.")
             print(f"{Fore.YELLOW}Install dependencies: pip install dropbox")
+        return True
+    
+    # Show OneDrive setup if requested
+    if args.onedrive_setup:
+        if ONEDRIVE_AVAILABLE:
+            setup_onedrive_app()
+        else:
+            print(f"{Fore.RED}OneDrive integration not available.")
+            print(f"{Fore.YELLOW}Install dependencies: pip install msal requests")
         return True
     
     # Show Google Photos setup if requested

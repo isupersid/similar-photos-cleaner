@@ -45,6 +45,11 @@ photo_decisions.json
 
 # Dropbox cache
 .photocleaner_dropbox_cache.json
+dropbox_config.json
+
+# OneDrive cache and config
+.photocleaner_onedrive_cache.json
+onedrive_config.json
 
 # Google Photos cache and credentials
 .photocleaner_google_token.pickle

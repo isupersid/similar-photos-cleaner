@@ -231,3 +231,62 @@ class GooglePhotosStorageProvider(StorageProvider):
         metadata = self.photo_metadata.get(str(temp_path))
         return metadata.get('id') if metadata else None
 
+
+class OneDriveStorageProvider(StorageProvider):
+    """OneDrive cloud storage provider"""
+    
+    def __init__(self, onedrive_client, folder: str = ''):
+        super().__init__()
+        self.client = onedrive_client
+        self.folder = folder
+    
+    def authenticate(self) -> bool:
+        """OneDrive authentication is handled during client creation"""
+        return self.client is not None
+    
+    def list_photos(self, folder: str = None, date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[Dict]:
+        """List photos from OneDrive"""
+        folder = folder or self.folder
+        return self.client.list_photos(
+            folder,
+            date_from=date_from,
+            date_to=date_to
+        )
+    
+    def download_photo(self, photo_metadata: Dict, output_path: Path) -> bool:
+        """Download a photo from OneDrive"""
+        return self.client.download_photo(photo_metadata['path'], output_path)
+    
+    def delete_photo(self, photo_path: str) -> bool:
+        """Move photo to OneDrive trash folder"""
+        # Extract item ID from metadata
+        # In fast mode, we need to get the ID from the path
+        # This is a limitation - we'll need the item ID
+        # For now, use move_photo_to_trash which requires ID
+        # We'll need to store the ID in metadata
+        for temp_path, metadata in self.photo_metadata.items():
+            cloud_path = metadata.get('onedrive_path')
+            if cloud_path == photo_path:
+                item_id = metadata.get('id')
+                if item_id:
+                    return self.client.move_photo_to_trash(item_id)
+        return False
+    
+    def get_display_name(self) -> str:
+        return f"OneDrive ({self.folder or 'root'})"
+    
+    def supports_automated_deletion(self) -> bool:
+        return True
+    
+    def get_cloud_path(self, temp_path: Path) -> Optional[str]:
+        """Get OneDrive path for a temporary file"""
+        metadata = self.photo_metadata.get(str(temp_path))
+        if metadata:
+            # Create a display path from folder + name
+            folder = self.folder or ''
+            name = metadata.get('name', '')
+            if folder:
+                return f"{folder}/{name}"
+            return f"/{name}"
+        return None
+
