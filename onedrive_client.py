@@ -86,18 +86,36 @@ class OneDriveClient:
                 print(f"{Fore.RED}Error description: {flow.get('error_description')}")
             return False
         
+        # Debug: Show available flow fields
+        print(f"{Fore.CYAN}[Debug] Device flow fields: {list(flow.keys())}")
+        
         print(f"\n{Fore.YELLOW}{'='*80}")
         print(f"{Fore.YELLOW}ONEDRIVE AUTHENTICATION")
         print(f"{Fore.YELLOW}{'='*80}")
         print(f"{Fore.CYAN}{flow['message']}")
         print(f"{Fore.YELLOW}{'='*80}\n")
         
-        # Try to open browser automatically
+        # Try to open browser automatically with pre-filled code
+        # Microsoft provides 'verification_uri' (manual entry) and may provide a complete URL with code
+        verification_url_complete = flow.get('verification_uri_complete')
         verification_url = flow.get('verification_uri', '')
-        if verification_url:
+        
+        if verification_url_complete:
+            # Use the complete URL with code pre-filled (best user experience)
             try:
                 import webbrowser
-                print(f"{Fore.GREEN}Opening browser automatically...")
+                print(f"{Fore.GREEN}Opening browser with pre-filled code...")
+                print(f"{Fore.CYAN}URL: {verification_url_complete}")
+                webbrowser.open(verification_url_complete)
+            except Exception as e:
+                print(f"{Fore.YELLOW}Could not open browser automatically: {e}")
+                print(f"{Fore.YELLOW}Please open the URL manually: {verification_url_complete}")
+        elif verification_url:
+            # Fallback: Use basic URL (user must enter code manually)
+            try:
+                import webbrowser
+                print(f"{Fore.GREEN}Opening browser (you'll need to enter the code)...")
+                print(f"{Fore.CYAN}URL: {verification_url}")
                 webbrowser.open(verification_url)
             except Exception as e:
                 print(f"{Fore.YELLOW}Could not open browser automatically: {e}")
