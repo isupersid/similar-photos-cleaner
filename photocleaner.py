@@ -1,39 +1,26 @@
 #!/usr/bin/env python3
 """
 Photo Cleaner - Group similar photos and delete duplicates
+Core photo analysis and cleaning logic
 """
 
-import argparse
 import os
 import re
 import shutil
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Set, Tuple, Optional
-from collections import defaultdict
+from typing import List, Dict, Tuple, Optional
 
 import imagehash
 import numpy as np
-from PIL import Image, ImageStat
+from PIL import Image
 from PIL.ExifTags import TAGS
 from tqdm import tqdm
-from colorama import init, Fore, Style
+from colorama import init, Fore
 
 from html_report import HTMLReportGenerator
-
-try:
-    from dropbox_client import DropboxClient, setup_dropbox_app, create_dropbox_client
-    DROPBOX_AVAILABLE = True
-except ImportError:
-    DROPBOX_AVAILABLE = False
-
-try:
-    from google_photos_client import GooglePhotosClient, setup_google_photos, create_google_photos_client
-    GOOGLE_PHOTOS_AVAILABLE = True
-except ImportError:
-    GOOGLE_PHOTOS_AVAILABLE = False
+from storage_provider import StorageProvider, LocalStorageProvider
 
 # Register HEIF/HEIC support
 try:
@@ -119,31 +106,20 @@ class PhotoAnalyzer:
 class PhotoCleaner:
     """Main photo cleaning tool"""
     
-    def __init__(self, directory: Path, threshold: int = 15, dry_run: bool = True, 
+    def __init__(self, storage: StorageProvider, threshold: int = 15, dry_run: bool = True, 
                  interactive: bool = False, backup_dir: Path = None,
                  date_from: Optional[datetime] = None, date_to: Optional[datetime] = None,
-                 dropbox_mode: bool = False, dropbox_folder: str = '',
-                 google_photos_mode: bool = False, google_photos_album: str = '',
-                 use_search_api: bool = False, decisions_file: Optional[Path] = None):
-        self.directory = directory
+                 decisions_file: Optional[Path] = None):
+        self.storage = storage
         self.threshold = threshold
         self.dry_run = dry_run
         self.interactive = interactive
         self.backup_dir = backup_dir
         self.date_from = date_from
         self.date_to = date_to
-        self.dropbox_mode = dropbox_mode
-        self.dropbox_folder = dropbox_folder
-        self.google_photos_mode = google_photos_mode
-        self.google_photos_album = google_photos_album
-        self.use_search_api = use_search_api
         self.decisions_file = decisions_file
         self.custom_decisions = None
         self.analyzer = PhotoAnalyzer()
-        self.dropbox_client = None
-        self.google_photos_client = None
-        self.temp_dir = None
-        self.photo_metadata = {}  # Map temp paths to cloud metadata
         
         # Load custom decisions if provided
         if self.decisions_file:
@@ -203,9 +179,11 @@ class PhotoCleaner:
         total_space = 0
         valid_files = []
         
+        is_local = isinstance(self.storage, LocalStorageProvider)
+        
         for file_path in files_to_delete:
             # For cloud modes, paths are cloud paths
-            if self.dropbox_mode or self.google_photos_mode:
+            if not is_local:
                 # In cloud modes, paths are cloud paths
                 valid_files.append(file_path)
                 # We can't easily check size without downloading, so just add to list
@@ -246,19 +224,20 @@ class PhotoCleaner:
         
         for file_path in valid_files:
             try:
-                if self.dropbox_mode:
-                    # Dropbox deletion
-                    success = self.dropbox_client.move_photo_to_trash(str(file_path))
-                    if success:
-                        print(f"{Fore.GREEN}✓ Moved to Dropbox trash: {file_path}")
+                if not is_local:
+                    # Cloud deletion (Dropbox or Google Photos)
+                    success = self.storage.delete_photo(str(file_path))
+                    
+                    if self.storage.supports_automated_deletion():
+                        if success:
+                            print(f"{Fore.GREEN}✓ Deleted from {self.storage.get_display_name()}: {file_path}")
+                        else:
+                            raise Exception(f"Failed to delete from {self.storage.get_display_name()}")
                     else:
-                        raise Exception("Failed to move to trash")
-                
-                elif self.google_photos_mode:
-                    # Google Photos - API doesn't support deletion
-                    # Just list what would be deleted
-                    print(f"{Fore.YELLOW}⚠️  Identified for deletion: {file_path}")
-                    print(f"{Fore.YELLOW}   (Manual deletion required from Google Photos)")
+                        # Google Photos - no automated deletion
+                        print(f"{Fore.YELLOW}⚠️  Identified for deletion: {file_path}")
+                        print(f"{Fore.YELLOW}   (Manual deletion required from {self.storage.get_display_name()})")
+                    
                     deleted_count += 1
                 
                 else:
@@ -292,13 +271,13 @@ class PhotoCleaner:
         print(f"{Fore.CYAN}DELETION SUMMARY")
         print(f"{Fore.CYAN}{'='*80}")
         
-        if self.google_photos_mode:
+        if not self.storage.supports_automated_deletion():
             print(f"{Fore.YELLOW}✓ Identified for deletion: {deleted_count} files")
-            print(f"{Fore.YELLOW}⚠️  Google Photos API doesn't support automated deletion")
-            print(f"{Fore.YELLOW}⚠️  Please manually delete these photos from Google Photos")
+            print(f"{Fore.YELLOW}⚠️  {self.storage.get_display_name()} doesn't support automated deletion")
+            print(f"{Fore.YELLOW}⚠️  Please manually delete these photos from {self.storage.get_display_name()}")
         else:
             print(f"{Fore.GREEN}✓ Successfully deleted: {deleted_count} files")
-            if not self.dropbox_mode:
+            if is_local:
                 print(f"{Fore.GREEN}✓ Space freed: {self.format_size(space_freed)}")
         
         if failed_count > 0:
@@ -405,13 +384,12 @@ class PhotoCleaner:
         
     def find_images(self) -> List[Path]:
         """Find all image files in directory (or cloud storage)"""
-        if self.dropbox_mode:
-            return self.find_dropbox_images()
+        # Cloud storage (Dropbox, Google Photos, etc.)
+        if not isinstance(self.storage, LocalStorageProvider):
+            return self.find_cloud_images()
         
-        if self.google_photos_mode:
-            return self.find_google_photos_images()
-        
-        print(f"{Fore.CYAN}Scanning for images in {self.directory}...")
+        # Local filesystem
+        print(f"{Fore.CYAN}Scanning for images in {self.storage.directory}...")
         if self.date_from or self.date_to:
             date_range_str = ""
             if self.date_from:
@@ -423,7 +401,7 @@ class PhotoCleaner:
         images = []
         skipped = 0
         
-        for root, dirs, files in os.walk(self.directory):
+        for root, dirs, files in os.walk(self.storage.directory):
             for file in files:
                 if Path(file).suffix.lower() in IMAGE_EXTENSIONS:
                     img_path = Path(root) / file
@@ -437,39 +415,27 @@ class PhotoCleaner:
             print(f"{Fore.YELLOW}Skipped {skipped} images outside date range")
         return images
     
-    def find_dropbox_images(self) -> List[Path]:
-        """Find and download images from Dropbox"""
-        print(f"{Fore.CYAN}Fetching images from Dropbox folder: {self.dropbox_folder or 'root'}")
+    def find_cloud_images(self) -> List[Path]:
+        """Find and download images from cloud storage (unified for all providers)"""
+        print(f"{Fore.CYAN}Fetching images from {self.storage.get_display_name()}...")
         
-        # Show which method is being used
-        if self.use_search_api:
-            print(f"{Fore.YELLOW}⚠️  Using experimental Search API for date filtering")
-        
-        # Convert date filters to string format for Dropbox API
+        # Convert date filters to string format for cloud APIs
         date_from_str = self.date_from.strftime('%Y-%m-%d') if self.date_from else None
         date_to_str = self.date_to.strftime('%Y-%m-%d') if self.date_to else None
         
-        # Get list of photos from Dropbox (with date filtering if specified)
-        photos = self.dropbox_client.list_photos(
-            self.dropbox_folder, 
+        # Get list of photos from cloud storage
+        photos = self.storage.list_photos(
+            folder=None,  # Provider handles its own folder configuration
             date_from=date_from_str,
-            date_to=date_to_str,
-            use_search_api=self.use_search_api
+            date_to=date_to_str
         )
         
         if not photos:
             print(f"{Fore.YELLOW}No photos found matching criteria")
             return []
         
-        # Note: When date filtering is used, photos are already filtered on server side!
-        # Only do additional filename-based filtering if we got results without date filter
-        if not self.date_from and not self.date_to:
-            # No filtering needed
-            pass
-        else:
-            # Photos are already filtered by Dropbox search API
-            # But let's do a client-side double-check for filename-based dates
-            # (in case Dropbox modified date doesn't match the actual photo date)
+        # Optional: Verify dates from filenames (for providers that support it)
+        if self.date_from or self.date_to:
             print(f"{Fore.CYAN}Verifying dates from filenames...")
             
             verified_photos = []
@@ -477,7 +443,7 @@ class PhotoCleaner:
             
             for photo in photos:
                 # Try to extract from filename as additional check
-                temp_path = Path(photo['name'])
+                temp_path = Path(photo.get('filename', photo.get('name', 'unknown')))
                 filename_date = self.extract_date_from_filename(temp_path)
                 
                 # If we found a date in filename, verify it's in range
@@ -503,60 +469,8 @@ class PhotoCleaner:
             print(f"{Fore.YELLOW}No photos match the criteria")
             return []
         
-        # Create temporary directory for downloads
-        self.temp_dir = tempfile.mkdtemp(prefix='photocleaner_')
-        print(f"{Fore.CYAN}Downloading {len(photos)} photos to temporary directory for analysis...")
-        
-        downloaded_images = []
-        
-        for photo in tqdm(photos, desc="Downloading"):
-            # Use just the filename for temp path
-            temp_path = Path(self.temp_dir) / photo['name']
-            if self.dropbox_client.download_photo(photo['path'], temp_path):
-                downloaded_images.append(temp_path)
-                # Store metadata for later deletion
-                self.photo_metadata[str(temp_path)] = photo
-        
-        print(f"{Fore.GREEN}Downloaded {len(downloaded_images)} images from Dropbox")
-        return downloaded_images
-    
-    def find_google_photos_images(self) -> List[Path]:
-        """Find and download images from Google Photos"""
-        print(f"{Fore.CYAN}Fetching images from Google Photos...")
-        if self.google_photos_album:
-            print(f"{Fore.CYAN}Album: {self.google_photos_album}")
-        
-        # Convert date filters to string format for Google Photos API
-        date_from_str = self.date_from.strftime('%Y-%m-%d') if self.date_from else None
-        date_to_str = self.date_to.strftime('%Y-%m-%d') if self.date_to else None
-        
-        # Get list of photos from Google Photos (with date filtering if specified)
-        photos = self.google_photos_client.list_photos(
-            album_name=self.google_photos_album or None,
-            date_from=date_from_str,
-            date_to=date_to_str
-        )
-        
-        if not photos:
-            print(f"{Fore.YELLOW}No photos found matching criteria")
-            return []
-        
-        # Create temporary directory for downloads
-        self.temp_dir = tempfile.mkdtemp(prefix='photocleaner_')
-        print(f"{Fore.CYAN}Downloading {len(photos)} photos to temporary directory for analysis...")
-        
-        downloaded_images = []
-        
-        for photo in tqdm(photos, desc="Downloading"):
-            # Use just the filename for temp path
-            temp_path = Path(self.temp_dir) / photo['filename']
-            if self.google_photos_client.download_photo(photo['url'], temp_path):
-                downloaded_images.append(temp_path)
-                # Store metadata for later reference
-                self.photo_metadata[str(temp_path)] = photo
-        
-        print(f"{Fore.GREEN}Downloaded {len(downloaded_images)} images from Google Photos")
-        return downloaded_images
+        # Use the storage provider's download method
+        return self.storage.download_photos_for_analysis(photos)
     
     def group_similar_images(self, images: List[Path]) -> List[List[Path]]:
         """Group similar images based on perceptual hash"""
@@ -779,44 +693,13 @@ class PhotoCleaner:
         """Run the photo cleaner"""
         print(f"{Fore.CYAN}Photo Cleaner Starting...")
         
-        # Handle Dropbox mode
-        if self.dropbox_mode:
-            if not DROPBOX_AVAILABLE:
-                print(f"{Fore.RED}Error: Dropbox integration not available.")
-                print(f"{Fore.YELLOW}Install dependencies: pip install dropbox")
-                return
-            
-            print(f"{Fore.CYAN}Mode: Dropbox Cloud")
-            print(f"{Fore.CYAN}Folder: {self.dropbox_folder or 'root'}")
-            
-            # Authenticate
-            self.dropbox_client = create_dropbox_client()
-            if not self.dropbox_client:
-                print(f"{Fore.RED}Failed to authenticate with Dropbox")
-                return
-        
-        # Handle Google Photos mode
-        elif self.google_photos_mode:
-            if not GOOGLE_PHOTOS_AVAILABLE:
-                print(f"{Fore.RED}Error: Google Photos integration not available.")
-                print(f"{Fore.YELLOW}Install dependencies: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client")
-                return
-            
-            print(f"{Fore.CYAN}Mode: Google Photos")
-            if self.google_photos_album:
-                print(f"{Fore.CYAN}Album: {self.google_photos_album}")
-            
-            # Authenticate
-            self.google_photos_client = create_google_photos_client()
-            if not self.google_photos_client:
-                print(f"{Fore.RED}Failed to authenticate with Google Photos")
-                return
-        
-        # Local mode
+        # Display storage mode info
+        if not isinstance(self.storage, LocalStorageProvider):
+            print(f"{Fore.CYAN}Mode: {self.storage.get_display_name()}")
         else:
-            print(f"{Fore.CYAN}Directory: {self.directory}")
-            if not self.directory.exists():
-                print(f"{Fore.RED}Error: Directory does not exist: {self.directory}")
+            print(f"{Fore.CYAN}Directory: {self.storage.directory}")
+            if not self.storage.directory.exists():
+                print(f"{Fore.RED}Error: Directory does not exist: {self.storage.directory}")
                 return
         
         print(f"{Fore.CYAN}Threshold: {self.threshold}")
@@ -839,14 +722,8 @@ class PhotoCleaner:
         # FAST MODE: If decisions file provided, skip finding/grouping and go straight to deletion
         if self.decisions_file:
             self.process_from_decisions()
-            
-            # Cleanup temporary directory if cloud mode
-            if (self.dropbox_mode or self.google_photos_mode) and self.temp_dir:
-                try:
-                    shutil.rmtree(self.temp_dir)
-                    print(f"{Fore.CYAN}Cleaned up temporary files")
-                except Exception as e:
-                    print(f"{Fore.YELLOW}Warning: Could not clean up temp directory: {e}")
+            # Cleanup is handled by storage provider
+            self.storage.cleanup()
             return
         
         # NORMAL MODE: Find, analyze, and group images
@@ -882,254 +759,45 @@ class PhotoCleaner:
                     'delete': delete_data
                 })
             
-            # Generate report with default name
-            report_path = self.directory / 'photo_cleaner_report.html'
-            report_generator = HTMLReportGenerator(self.directory, self.threshold, self.dry_run)
+            # Generate report
+            report_path = self.storage.directory if isinstance(self.storage, LocalStorageProvider) else Path.cwd()
+            report_file = report_path / 'photo_cleaner_report.html'
+            report_generator = HTMLReportGenerator(report_path, self.threshold, self.dry_run)
             
-            # Pass photo metadata for Dropbox mode
-            if self.dropbox_mode:
-                if report_generator.save(groups_data, report_path, self.photo_metadata):
-                    file_url = f"file://{report_path.resolve()}"
-                    print(f"\n{Fore.GREEN}{'='*80}")
-                    print(f"{Fore.GREEN}HTML Report Generated!")
-                    print(f"{Fore.GREEN}{'='*80}")
-                    print(f"{Fore.CYAN}📄 Report location: {Fore.WHITE}{report_path.resolve()}")
-                    print(f"{Fore.CYAN}🔗 Click to open: \033]8;;{file_url}\033\\{file_url}\033]8;;\033\\")
-                    print(f"{Fore.YELLOW}⚠️  Note: Report contains Dropbox paths for use with --apply-decisions")
-                    print(f"{Fore.GREEN}{'='*80}\n")
-            else:
-                if report_generator.save(groups_data, report_path):
-                    file_url = f"file://{report_path.resolve()}"
-                    print(f"\n{Fore.GREEN}{'='*80}")
-                    print(f"{Fore.GREEN}HTML Report Generated!")
-                    print(f"{Fore.GREEN}{'='*80}")
-                    print(f"{Fore.CYAN}📄 Report location: {Fore.WHITE}{report_path.resolve()}")
-                    print(f"{Fore.CYAN}🔗 Click to open: \033]8;;{file_url}\033\\{file_url}\033]8;;\033\\")
-                    print(f"{Fore.GREEN}{'='*80}\n")
+            # Pass photo metadata if available (for cloud providers)
+            photo_metadata = self.storage.photo_metadata if not isinstance(self.storage, LocalStorageProvider) else None
+            
+            if report_generator.save(groups_data, report_file, photo_metadata):
+                file_url = f"file://{report_file.resolve()}"
+                print(f"\n{Fore.GREEN}{'='*80}")
+                print(f"{Fore.GREEN}HTML Report Generated!")
+                print(f"{Fore.GREEN}{'='*80}")
+                print(f"{Fore.CYAN}📄 Report location: {Fore.WHITE}{report_file.resolve()}")
+                print(f"{Fore.CYAN}🔗 Click to open: \033]8;;{file_url}\033\\{file_url}\033]8;;\033\\")
+                if photo_metadata:
+                    print(f"{Fore.YELLOW}⚠️  Note: Report contains cloud paths for use with --apply-decisions")
+                print(f"{Fore.GREEN}{'='*80}\n")
         
         # Process groups
         self.process_groups(groups)
         
-        # Cleanup temporary directory if cloud mode
-        if (self.dropbox_mode or self.google_photos_mode) and self.temp_dir:
-            try:
-                shutil.rmtree(self.temp_dir)
-                print(f"{Fore.CYAN}Cleaned up temporary files")
-            except Exception as e:
-                print(f"{Fore.YELLOW}Warning: Could not clean up temp directory: {e}")
+        # Cleanup is handled by storage provider
+        self.storage.cleanup()
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Group similar photos and delete duplicates to save disk space',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Preview mode (default - generates HTML report, no deletions)
-  %(prog)s /path/to/photos
-
-  # Execute deletion
-  %(prog)s /path/to/photos --execute
-
-  # Dropbox mode - setup first
-  %(prog)s --dropbox-setup
-
-  # Dropbox mode - clean photos from Dropbox cloud
-  %(prog)s --dropbox
-
-  # Dropbox mode with specific folder
-  %(prog)s --dropbox --dropbox-folder "/Camera Uploads"
-
-  # Dropbox mode with date filtering
-  %(prog)s --dropbox --date-from 2025-11-01 --date-to 2025-11-30
-
-  # Process only photos from November 2025
-  %(prog)s /path/to/photos --date-from 2025-11-01 --date-to 2025-11-30
-
-  # Process photos from a specific date onwards
-  %(prog)s /path/to/photos --date-from 2020-01-01 --execute
-
-  # Process photos up to a specific date
-  %(prog)s /path/to/photos --date-to 2015-12-31
-
-  # Adjust similarity threshold
-  %(prog)s /path/to/photos --threshold 10 --execute
-
-  # Interactive mode (confirm each deletion)
-  %(prog)s /path/to/photos --interactive
-
-  # Move to backup instead of deleting
-  %(prog)s /path/to/photos --execute --backup-dir ./backup
-        """
-    )
+    """Main entry point - delegates to CLI module"""
+    from cli import parse_args
     
-    parser.add_argument(
-        'directory',
-        type=str,
-        nargs='?',
-        default='.',
-        help='Directory containing photos to clean (not needed for --dropbox mode)'
-    )
+    # Parse command-line arguments
+    config = parse_args()
     
-    parser.add_argument(
-        '--threshold',
-        type=int,
-        default=15,
-        help='Similarity threshold (0-64, lower = more strict, default: 15)'
-    )
-    
-    parser.add_argument(
-        '--execute',
-        action='store_true',
-        help='Execute deletion (default is dry-run/preview mode)'
-    )
-    
-    parser.add_argument(
-        '--interactive',
-        action='store_true',
-        help='Confirm each group before deletion (implies --execute)'
-    )
-    
-    parser.add_argument(
-        '--date-from',
-        type=str,
-        help='Process images from this date onwards (format: YYYY-MM-DD)'
-    )
-    
-    parser.add_argument(
-        '--date-to',
-        type=str,
-        help='Process images up to this date (format: YYYY-MM-DD)'
-    )
-    
-    parser.add_argument(
-        '--backup-dir',
-        type=str,
-        help='Move files to backup directory instead of deleting'
-    )
-    
-    parser.add_argument(
-        '--dropbox',
-        action='store_true',
-        help='Use Dropbox cloud storage instead of local directory'
-    )
-    
-    parser.add_argument(
-        '--dropbox-folder',
-        type=str,
-        default='',
-        help='Dropbox folder to process (default: root folder, use "" for root or "/Camera Uploads" for specific folder)'
-    )
-    
-    parser.add_argument(
-        '--dropbox-setup',
-        action='store_true',
-        help='Show Dropbox setup instructions'
-    )
-    
-    parser.add_argument(
-        '--use-search-api',
-        action='store_true',
-        help='[Dropbox only] Use Search API for date filtering (experimental/debug)'
-    )
-    
-    # Google Photos arguments
-    parser.add_argument(
-        '--google-photos',
-        action='store_true',
-        help='Process photos from Google Photos instead of local directory'
-    )
-    
-    parser.add_argument(
-        '--google-photos-album',
-        type=str,
-        default='',
-        help='Google Photos album to process (default: all photos)'
-    )
-    
-    parser.add_argument(
-        '--google-photos-setup',
-        action='store_true',
-        help='Show Google Photos setup instructions'
-    )
-    
-    parser.add_argument(
-        '--apply-decisions',
-        type=str,
-        help='Apply custom keep/delete decisions from JSON file (generated from HTML report)'
-    )
-    
-    args = parser.parse_args()
-    
-    # Show Dropbox setup if requested
-    if args.dropbox_setup:
-        if DROPBOX_AVAILABLE:
-            setup_dropbox_app()
-        else:
-            print(f"{Fore.RED}Dropbox integration not available.")
-            print(f"{Fore.YELLOW}Install dependencies: pip install dropbox")
+    # If config is None, a setup command was run
+    if config is None:
         return
     
-    # Show Google Photos setup if requested
-    if args.google_photos_setup:
-        if GOOGLE_PHOTOS_AVAILABLE:
-            setup_google_photos()
-        else:
-            print(f"{Fore.RED}Google Photos integration not available.")
-            print(f"{Fore.YELLOW}Install dependencies: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client")
-        return
-    
-    # Convert paths
-    directory = Path(args.directory).resolve() if not (args.dropbox or args.google_photos) else Path.cwd()
-    backup_dir = Path(args.backup_dir).resolve() if args.backup_dir else None
-    decisions_file = Path(args.apply_decisions).resolve() if args.apply_decisions else None
-    
-    # Validate decisions file
-    if decisions_file and not decisions_file.exists():
-        print(f"{Fore.RED}Error: Decisions file not found: {decisions_file}")
-        sys.exit(1)
-    
-    # Parse date arguments
-    date_from = None
-    date_to = None
-    
-    if args.date_from:
-        try:
-            date_from = datetime.strptime(args.date_from, "%Y-%m-%d")
-        except ValueError:
-            print(f"{Fore.RED}Error: Invalid --date-from format. Use YYYY-MM-DD")
-            sys.exit(1)
-    
-    if args.date_to:
-        try:
-            date_to = datetime.strptime(args.date_to, "%Y-%m-%d")
-        except ValueError:
-            print(f"{Fore.RED}Error: Invalid --date-to format. Use YYYY-MM-DD")
-            sys.exit(1)
-    
-    if date_from and date_to and date_from > date_to:
-        print(f"{Fore.RED}Error: --date-from must be before --date-to")
-        sys.exit(1)
-    
-    # Dry run is default unless --execute or --interactive is specified
-    dry_run = not (args.execute or args.interactive)
-    
-    # Create and run cleaner
-    cleaner = PhotoCleaner(
-        directory=directory,
-        threshold=args.threshold,
-        dry_run=dry_run,
-        interactive=args.interactive,
-        backup_dir=backup_dir,
-        date_from=date_from,
-        date_to=date_to,
-        dropbox_mode=args.dropbox,
-        dropbox_folder=args.dropbox_folder,
-        google_photos_mode=args.google_photos,
-        google_photos_album=args.google_photos_album,
-        use_search_api=args.use_search_api,
-        decisions_file=decisions_file
-    )
+    # Create and run cleaner with the configuration
+    cleaner = PhotoCleaner(**config)
     
     try:
         cleaner.run()
