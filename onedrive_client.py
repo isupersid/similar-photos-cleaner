@@ -143,21 +143,42 @@ class OneDriveClient:
         
         url = f"{GRAPH_API_BASE}{endpoint}"
         
+        # Log request details
+        print(f"{Fore.CYAN}[API Request] {method} {endpoint}")
+        if kwargs.get('json'):
+            print(f"{Fore.CYAN}  Body: {kwargs['json']}")
+        
         try:
             response = requests.request(method, url, headers=headers, **kwargs)
+            
+            # Log response details
+            print(f"{Fore.CYAN}[API Response] Status: {response.status_code}")
+            if response.status_code >= 400:
+                print(f"{Fore.YELLOW}  URL: {url}")
+                try:
+                    error_data = response.json()
+                    print(f"{Fore.YELLOW}  Error: {error_data.get('error', {})}")
+                except:
+                    print(f"{Fore.YELLOW}  Response Text: {response.text[:300]}")
             
             # Handle token expiration
             if response.status_code == 401:
                 print(f"{Fore.YELLOW}Token expired, re-authenticating...")
                 if self.authenticate():
                     headers['Authorization'] = f'Bearer {self.access_token}'
+                    print(f"{Fore.CYAN}[API Retry] {method} {endpoint}")
                     response = requests.request(method, url, headers=headers, **kwargs)
+                    print(f"{Fore.CYAN}[API Response] Status: {response.status_code}")
                 else:
                     return None
             
             return response
         except Exception as e:
             print(f"{Fore.RED}Request failed: {e}")
+            print(f"{Fore.RED}  Method: {method}")
+            print(f"{Fore.RED}  URL: {url}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def list_photos(self, folder: str = '', date_from: str = None, date_to: str = None) -> List[Dict]:
