@@ -38,5 +38,15 @@ backup/
 .DS_Store
 Thumbs.db
 
+# Generated files
+photo_cleaner_report.html
+photo_decisions.json
+*.json.bak
 
+# Dropbox cache
+.photocleaner_dropbox_cache.json
+
+# Temporary download directories
+temp_photos/
+photocleaner_*/
 
