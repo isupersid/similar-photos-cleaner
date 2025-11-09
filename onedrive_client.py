@@ -24,7 +24,7 @@ except ImportError:
 # Microsoft Graph API endpoints
 GRAPH_API_BASE = "https://graph.microsoft.com/v1.0"
 AUTHORITY = "https://login.microsoftonline.com/common"
-SCOPES = ["Files.ReadWrite.All", "offline_access"]
+SCOPES = ["Files.ReadWrite.All"]  # offline_access is automatically included
 
 
 class OneDriveClient:
