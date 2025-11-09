@@ -144,9 +144,11 @@ class OneDriveClient:
         url = f"{GRAPH_API_BASE}{endpoint}"
         
         # Log request details
-        print(f"{Fore.CYAN}[API Request] {method} {endpoint}")
+        print(f"{Fore.CYAN}[API Request] {method} {url}")
         if kwargs.get('json'):
             print(f"{Fore.CYAN}  Body: {kwargs['json']}")
+        if kwargs.get('params'):
+            print(f"{Fore.CYAN}  Params: {kwargs['params']}")
         
         try:
             response = requests.request(method, url, headers=headers, **kwargs)
@@ -166,7 +168,7 @@ class OneDriveClient:
                 print(f"{Fore.YELLOW}Token expired, re-authenticating...")
                 if self.authenticate():
                     headers['Authorization'] = f'Bearer {self.access_token}'
-                    print(f"{Fore.CYAN}[API Retry] {method} {endpoint}")
+                    print(f"{Fore.CYAN}[API Retry] {method} {url}")
                     response = requests.request(method, url, headers=headers, **kwargs)
                     print(f"{Fore.CYAN}[API Response] Status: {response.status_code}")
                 else:
@@ -224,7 +226,7 @@ class OneDriveClient:
         
         # Use the /me/photos endpoint which returns items with image metadata
         # This endpoint automatically filters to just photos
-        endpoint = "/me/drive/special/pictures/children"
+        endpoint = "/me/drive/special/photos/children"
         
         photos = []
         next_link = None
