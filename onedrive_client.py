@@ -227,9 +227,6 @@ class OneDriveClient:
         """
         Search for photos using Microsoft Graph Photos API with date filtering
         
-        Microsoft Graph has a dedicated photos collection that uses image metadata.
-        Endpoint: /me/photos
-        
         Args:
             folder: Folder path (not used for photos API, searches all photos)
             date_from: Start date (YYYY-MM-DD)
@@ -242,9 +239,23 @@ class OneDriveClient:
         
         print(f"{Fore.CYAN}Using Microsoft Graph Photos API...")
         
+        # Try using OData $filter query parameter for server-side filtering
+        # Build filter expression
+        filter_parts = []
+        if date_from:
+            filter_parts.append(f"lastModifiedDateTime ge {date_from}T00:00:00Z")
+        if date_to:
+            filter_parts.append(f"lastModifiedDateTime le {date_to}T23:59:59Z")
+        
+        filter_query = " and ".join(filter_parts) if filter_parts else None
+        
         # Use the /me/photos endpoint which returns items with image metadata
         # This endpoint automatically filters to just photos
         endpoint = "/me/drive/special/photos/children"
+        if filter_query:
+            # Try adding OData filter
+            endpoint += f"?$filter={filter_query}"
+            print(f"{Fore.CYAN}Attempting server-side date filter: {filter_query}")
         
         photos = []
         next_link = None
@@ -263,7 +274,7 @@ class OneDriveClient:
                 response = self._make_request('GET', endpoint)
             
             if not response or response.status_code != 200:
-                print(f"{Fore.YELLOW}Photos API not available")
+                print(f"{Fore.YELLOW}Photos API with server-side filtering not available")
                 print(f"{Fore.YELLOW}  Status: {response.status_code if response else 'No response'}")
                 if response:
                     print(f"{Fore.YELLOW}  Endpoint: {endpoint}")
@@ -273,7 +284,7 @@ class OneDriveClient:
                         print(f"{Fore.YELLOW}  Message: {error_data.get('error', {}).get('message', 'No message')}")
                     except:
                         print(f"{Fore.YELLOW}  Response: {response.text[:200] if response.text else 'Empty'}")
-                print(f"{Fore.CYAN}Falling back to standard search...")
+                print(f"{Fore.CYAN}Falling back to client-side filtering...")
                 # Fallback to standard listing with client-side filtering
                 return self._list_photos_standard_with_date_filter(folder, date_from, date_to)
             
@@ -281,6 +292,17 @@ class OneDriveClient:
             items = data.get('value', [])
             
             print(f"{Fore.CYAN}Batch {batch_count}: Found {len(items)} photos")
+            
+            # Debug: Show sample dates from first batch
+            if batch_count == 1 and len(items) > 0:
+                sample_dates = []
+                for i, item in enumerate(items[:5]):  # Show first 5
+                    modified_str = item.get('lastModifiedDateTime', 'No date')
+                    sample_dates.append(f"{item.get('name', 'unknown')}: {modified_str}")
+                print(f"{Fore.CYAN}[Debug] Sample dates from first 5 photos:")
+                for date_info in sample_dates:
+                    print(f"{Fore.CYAN}  {date_info}")
+                print(f"{Fore.CYAN}[Debug] Date range filter: {date_from} to {date_to}")
             
             # Filter by date
             for item in items:
