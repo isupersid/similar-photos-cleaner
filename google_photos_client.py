@@ -208,10 +208,15 @@ class GooglePhotosClient:
                     request_body['filters'] = filters
                 
                 # Make API request
-                if album_id:
+                # Use search() when we have albumId or filters, list() otherwise
+                if album_id or filters:
                     results = self.service.mediaItems().search(body=request_body).execute()
                 else:
-                    results = self.service.mediaItems().search(body=request_body).execute()
+                    # list() doesn't use a body, just query parameters
+                    list_params = {'pageSize': 100}
+                    if page_token:
+                        list_params['pageToken'] = page_token
+                    results = self.service.mediaItems().list(**list_params).execute()
                 
                 items = results.get('mediaItems', [])
                 
@@ -304,19 +309,24 @@ class GooglePhotosClient:
 
 
 def setup_google_photos():
-    """Show setup instructions for Google Photos integration"""
+    """Show setup instructions for Google Drive integration"""
     print(f"\n{Fore.CYAN}{'='*80}")
-    print(f"{Fore.CYAN}Google Photos Setup Instructions")
+    print(f"{Fore.CYAN}Google Drive Integration Setup")
     print(f"{Fore.CYAN}{'='*80}\n")
+    
+    print(f"{Fore.YELLOW}⚠️  IMPORTANT NOTE:")
+    print(f"{Fore.YELLOW}This integrates with Google DRIVE, not Google Photos library.")
+    print(f"{Fore.YELLOW}It will access photos uploaded to Drive folders, not photos.google.com")
+    print(f"{Fore.YELLOW}For Google Photos library access, use Google Takeout instead.\n")
     
     print(f"{Fore.GREEN}Step 1: Create Google Cloud Project")
     print(f"{Fore.WHITE}1. Go to: https://console.cloud.google.com/")
     print(f"{Fore.WHITE}2. Create a new project (or select existing)")
     print(f"{Fore.WHITE}3. Name it something like 'Photo Cleaner'\n")
     
-    print(f"{Fore.GREEN}Step 2: Enable Google Photos API")
+    print(f"{Fore.GREEN}Step 2: Enable Google Drive API")
     print(f"{Fore.WHITE}1. Go to: https://console.cloud.google.com/apis/library")
-    print(f"{Fore.WHITE}2. Search for 'Photos Library API'")
+    print(f"{Fore.WHITE}2. Search for 'Google Drive API' (NOT Photos Library API)")
     print(f"{Fore.WHITE}3. Click 'Enable'\n")
     
     print(f"{Fore.GREEN}Step 3: Create OAuth 2.0 Credentials")
@@ -325,8 +335,10 @@ def setup_google_photos():
     print(f"{Fore.WHITE}3. Configure consent screen if needed:")
     print(f"{Fore.WHITE}   - User type: External")
     print(f"{Fore.WHITE}   - App name: Photo Cleaner")
-    print(f"{Fore.WHITE}   - Add your email")
-    print(f"{Fore.WHITE}   - Add scopes: photoslibrary.readonly, photoslibrary.appendonly")
+    print(f"{Fore.WHITE}   - Add your email as test user")
+    print(f"{Fore.WHITE}   - Add scopes:")
+    print(f"{Fore.WHITE}     * https://www.googleapis.com/auth/drive.photos.readonly")
+    print(f"{Fore.WHITE}     * https://www.googleapis.com/auth/drive")
     print(f"{Fore.WHITE}4. Create OAuth client ID:")
     print(f"{Fore.WHITE}   - Application type: Desktop app")
     print(f"{Fore.WHITE}   - Name: Photo Cleaner Desktop")
@@ -340,11 +352,14 @@ def setup_google_photos():
     print(f"{Fore.WHITE}pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client\n")
     
     print(f"{Fore.GREEN}Step 6: Test Connection")
-    print(f"{Fore.WHITE}python photocleaner.py --google-photos\n")
+    print(f"{Fore.WHITE}python photocleaner.py --google-photos --date-from 2025-12-01\n")
     
-    print(f"{Fore.YELLOW}Note: Google Photos API has read-only access for most operations.")
-    print(f"{Fore.YELLOW}Deleted photos will be identified, but manual deletion may be required.\n")
+    print(f"{Fore.GREEN}✅ Features:")
+    print(f"{Fore.WHITE}- Accesses photos uploaded to Google Drive folders")
+    print(f"{Fore.WHITE}- Supports automated deletion (moves to Drive trash)")
+    print(f"{Fore.WHITE}- Works with shared Drive folders\n")
     
+    print(f"{Fore.YELLOW}📖 Full documentation: GOOGLE_PHOTOS_SETUP.md")
     print(f"{Fore.CYAN}{'='*80}\n")
 
 

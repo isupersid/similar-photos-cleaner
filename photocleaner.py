@@ -792,6 +792,21 @@ class PhotoCleaner:
         
         if not groups:
             print(f"{Fore.GREEN}No duplicate or similar images found!")
+            
+            # Generate gallery report showing all photos found
+            report_path = self.storage.directory if isinstance(self.storage, LocalStorageProvider) else Path.cwd()
+            report_file = report_path / 'photo_cleaner_report.html'
+            report_generator = HTMLReportGenerator(report_path, self.threshold, self.dry_run)
+            
+            if report_generator.save_all_photos_report(images, report_file):
+                file_url = f"file://{report_file.resolve()}"
+                print(f"\n{Fore.GREEN}{'='*80}")
+                print(f"{Fore.GREEN}Gallery Report Generated!")
+                print(f"{Fore.GREEN}{'='*80}")
+                print(f"{Fore.CYAN}📄 Report location: {Fore.WHITE}{report_file.resolve()}")
+                print(f"{Fore.CYAN}🔗 Click to open: \033]8;;{file_url}\033\\{file_url}\033]8;;\033\\")
+                print(f"{Fore.GREEN}{'='*80}\n")
+            
             return
         
         # Generate HTML report (always in dry-run mode)

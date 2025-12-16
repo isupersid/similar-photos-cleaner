@@ -932,6 +932,257 @@ class HTMLReportGenerator:
             print(f"{Fore.RED}Error saving HTML report: {e}")
             return False
     
+    def generate_all_photos_report(self, image_paths: List[Path]) -> str:
+        """
+        Generate HTML report showing all photos found (when no duplicates exist)
+        
+        Args:
+            image_paths: List of Path objects for all images found
+        
+        Returns:
+            HTML content as string
+        """
+        print(f"{Fore.CYAN}Generating gallery of all photos found...")
+        
+        # Calculate statistics
+        total_images = len(image_paths)
+        total_size = sum(img.stat().st_size for img in image_paths)
+        
+        # Start building HTML
+        html_parts = []
+        html_parts.append(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Cleaner - All Photos Found</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }}
+        
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+        }}
+        
+        .header {{
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 3px solid #667eea;
+        }}
+        
+        .header h1 {{
+            font-size: 2.5em;
+            color: #2d3748;
+            margin-bottom: 10px;
+        }}
+        
+        .header .subtitle {{
+            font-size: 1.2em;
+            color: #718096;
+        }}
+        
+        .stats {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }}
+        
+        .stat-card {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }}
+        
+        .stat-card .number {{
+            font-size: 2.5em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }}
+        
+        .stat-card .label {{
+            font-size: 1em;
+            opacity: 0.9;
+        }}
+        
+        .info-box {{
+            background: #e6fffa;
+            border-left: 4px solid #38b2ac;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 8px;
+        }}
+        
+        .info-box h3 {{
+            color: #234e52;
+            margin-bottom: 10px;
+        }}
+        
+        .info-box p {{
+            color: #2c7a7b;
+            line-height: 1.6;
+        }}
+        
+        .gallery {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }}
+        
+        .photo-card {{
+            background: #f7fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 15px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }}
+        
+        .photo-card:hover {{
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            border-color: #667eea;
+        }}
+        
+        .photo-card img {{
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }}
+        
+        .photo-info {{
+            font-size: 0.9em;
+        }}
+        
+        .photo-name {{
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 5px;
+            word-break: break-word;
+        }}
+        
+        .photo-size {{
+            color: #718096;
+            font-size: 0.85em;
+        }}
+        
+        .footer {{
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+            text-align: center;
+            color: #718096;
+            font-size: 0.9em;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📸 Photo Cleaner Gallery</h1>
+            <p class="subtitle">All Photos Found - No Duplicates Detected</p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="number">{total_images}</div>
+                <div class="label">Photos Found</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{self.format_size(total_size)}</div>
+                <div class="label">Total Size</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">0</div>
+                <div class="label">Duplicates Found</div>
+            </div>
+        </div>
+        
+        <div class="info-box">
+            <h3>✅ Great News!</h3>
+            <p>No duplicate or similar images were found in your photo library. All {total_images} photos appear to be unique based on the similarity threshold of {self.threshold}.</p>
+        </div>
+        
+        <h2 style="color: #2d3748; margin-bottom: 20px;">All Photos</h2>
+        <div class="gallery">
+""")
+        
+        # Add each photo
+        for img_path in image_paths:
+            try:
+                file_size = img_path.stat().st_size
+                thumbnail = self.image_to_base64(img_path, max_size=250)
+                
+                html_parts.append(f"""
+            <div class="photo-card">
+                <img src="{thumbnail}" alt="{img_path.name}" loading="lazy">
+                <div class="photo-info">
+                    <div class="photo-name" title="{img_path.name}">{img_path.name}</div>
+                    <div class="photo-size">{self.format_size(file_size)}</div>
+                </div>
+            </div>
+""")
+            except Exception as e:
+                print(f"{Fore.YELLOW}Warning: Could not add {img_path.name} to report: {e}")
+        
+        # Close HTML
+        html_parts.append("""
+        </div>
+        
+        <div class="footer">
+            <p>Generated by Photo Cleaner on """ + datetime.now().strftime("%Y-%m-%d at %I:%M %p") + """</p>
+            <p style="margin-top: 10px;">All photos are unique - no action needed! 🎉</p>
+        </div>
+    </div>
+</body>
+</html>
+""")
+        
+        return ''.join(html_parts)
+    
+    def save_all_photos_report(self, image_paths: List[Path], output_path: Path) -> bool:
+        """
+        Generate and save gallery report showing all photos (no duplicates)
+        
+        Args:
+            image_paths: List of Path objects for all images
+            output_path: Path to save the HTML file
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            html_content = self.generate_all_photos_report(image_paths)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            print(f"{Fore.GREEN}Gallery report saved to: {output_path}")
+            return True
+        except Exception as e:
+            print(f"{Fore.RED}Error saving gallery report: {e}")
+            return False
+    
     def _replace_with_cloud_paths(self, groups_data: List[dict], photo_metadata: dict) -> List[dict]:
         """Replace temp file paths with cloud paths (Dropbox/OneDrive) for cloud mode"""
         updated_groups = []

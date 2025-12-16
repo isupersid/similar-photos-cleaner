@@ -1,6 +1,6 @@
 # Photo Cleaner 📸
 
-A smart tool to group similar photos, identify the best quality image in each group, and delete duplicates to free up disk space. Works with both **local files** and **cloud storage** (Dropbox)!
+A smart tool to group similar photos, identify the best quality image in each group, and delete duplicates to free up disk space. Works with **local files** and **cloud storage** (Dropbox, OneDrive, Google Drive)!
 
 ## ✨ Features
 
@@ -85,6 +85,38 @@ python photocleaner.py --dropbox --dropbox-folder "/Camera Uploads" --date-from 
 # Execute deletion (moves to PhotoCleaner_Deleted folder in Dropbox)
 python photocleaner.py --dropbox --execute --date-from 2025-11-01 --date-to 2025-11-30
 ```
+
+### Google Drive Mode 💾
+
+Clean photos stored in Google Drive (not Google Photos library - see note below).
+
+**⚠️ Important**: Due to Google API changes (March 2025), this only accesses files uploaded to Google Drive, **NOT your Google Photos library**. For Google Photos, use [Google Takeout](https://takeout.google.com/) to download photos and run the cleaner locally.
+
+**One-time setup:**
+```bash
+# Show setup instructions
+python photocleaner.py --google-photos-setup
+
+# Follow the instructions to:
+# 1. Create Google Cloud project
+# 2. Enable Google Drive API
+# 3. Create OAuth credentials
+# 4. Save as google_photos_credentials.json
+```
+
+**Use Google Drive mode:**
+```bash
+# Preview - scans all images in Drive
+python photocleaner.py --google-photos
+
+# With date filtering (based on file creation date)
+python photocleaner.py --google-photos --date-from 2025-12-01 --date-to 2025-12-31
+
+# Execute deletion (moves to Drive trash)
+python photocleaner.py --google-photos --execute --date-from 2025-12-01
+```
+
+See [GOOGLE_PHOTOS_SETUP.md](GOOGLE_PHOTOS_SETUP.md) for detailed setup instructions.
 
 ### Advanced Options
 

@@ -22,7 +22,8 @@ except ImportError:
     ONEDRIVE_AVAILABLE = False
 
 try:
-    from google_photos_client import setup_google_photos, create_google_photos_client
+    from google_photos_client import setup_google_photos
+    from google_drive_photos import create_google_drive_photos_client
     GOOGLE_PHOTOS_AVAILABLE = True
 except ImportError:
     GOOGLE_PHOTOS_AVAILABLE = False
@@ -310,9 +311,9 @@ def create_storage_provider(args):
             sys.exit(1)
         
         # Authenticate
-        google_photos_client = create_google_photos_client()
+        google_photos_client = create_google_drive_photos_client()
         if not google_photos_client:
-            print(f"{Fore.RED}Failed to authenticate with Google Photos")
+            print(f"{Fore.RED}Failed to authenticate with Google Drive (for Photos)")
             sys.exit(1)
         
         return GooglePhotosStorageProvider(

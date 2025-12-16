@@ -210,21 +210,25 @@ class GooglePhotosStorageProvider(StorageProvider):
         )
     
     def download_photo(self, photo_metadata: Dict, output_path: Path) -> bool:
-        """Download a photo from Google Photos"""
-        return self.client.download_photo(photo_metadata['url'], output_path)
+        """Download a photo from Google Photos/Drive"""
+        # New Drive API uses 'id', old Photos API used 'url'
+        photo_id = photo_metadata.get('id') or photo_metadata.get('url')
+        return self.client.download_photo(photo_id, output_path)
     
     def delete_photo(self, photo_path: str, cloud_id: str = None) -> bool:
-        """Google Photos doesn't support automated deletion"""
-        # Just return False to indicate it wasn't deleted
-        # The calling code will handle this appropriately
-        return False
+        """Delete a photo from Google Drive (moves to trash)"""
+        if not cloud_id:
+            print(f"{Fore.YELLOW}Warning: No cloud ID provided for {photo_path}")
+            return False
+        
+        return self.client.delete_photo(cloud_id)
     
     def get_display_name(self) -> str:
         album_str = f" - Album: {self.album}" if self.album else ""
         return f"Google Photos{album_str}"
     
     def supports_automated_deletion(self) -> bool:
-        return False
+        return True
     
     def get_cloud_path(self, temp_path: Path) -> Optional[str]:
         """Get Google Photos ID for a temporary file"""
