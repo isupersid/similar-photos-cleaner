@@ -58,6 +58,14 @@ class GooglePhotosClient:
             try:
                 with open(self.token_path, 'rb') as token:
                     self.creds = pickle.load(token)
+                    
+                # Verify scopes match - if not, force re-authentication
+                if self.creds and hasattr(self.creds, 'scopes'):
+                    cached_scopes = set(self.creds.scopes) if self.creds.scopes else set()
+                    required_scopes = set(SCOPES)
+                    if cached_scopes != required_scopes:
+                        print(f"{Fore.YELLOW}Cached credentials have different scopes, re-authenticating...")
+                        self.creds = None
             except Exception as e:
                 print(f"{Fore.YELLOW}Warning: Could not load cached credentials: {e}")
                 self.creds = None
